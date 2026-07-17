@@ -1259,7 +1259,10 @@ class ConcreteConfig(_ember.ConfigOptions):
         rhou = self.setBoundaryValues(T, Y)
 
         if IC.flameType == 'premixed':
-            gas.set_equivalence_ratio(IC.equivalenceRatio, IC.fuel, IC.oxidizer)
+            if IC.reactants:
+                gas.X = IC.reactants
+            else:
+                gas.set_equivalence_ratio(IC.equivalenceRatio, IC.fuel, IC.oxidizer)
             gas.TP = IC.Tu, IC.pressure
             gas.equilibrate('HP')
             T[jm] = gas.T

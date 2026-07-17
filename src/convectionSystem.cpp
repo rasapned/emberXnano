@@ -31,7 +31,13 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
             dVdx0 = 0.5 * dVdx0 - 0.5 * rphalf[j-1] * (drhodt[j-1] + rho[j-1] * beta * U[j-1]);
         }
 
-        rV[j] = (x[j] - xVzero) * dVdx0;
+        // Guard against NaN/Inf in dVdx0
+        if (std::isfinite(dVdx0) && std::isfinite(xVzero)) {
+            rV[j] = (x[j] - xVzero) * dVdx0;
+        } else {
+            rV[j] = 0.0;
+        }
+        
         for (j=jContBC; j<jj; j++) {
             rV[j+1] = rV[j] - hh[j] * rphalf[j] * (drhodt[j] + rho[j] * beta * U[j]);
         }
@@ -39,7 +45,11 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
         if (jContBC != 0) {
             j = jContBC-1;
 //            dVdx0 = - drhodt[j] - rho[j] * U[j] * rphalf[j];
-            rV[j] = (x[j] - xVzero) * dVdx0;
+            if (std::isfinite(dVdx0) && std::isfinite(xVzero)) {
+                rV[j] = (x[j] - xVzero) * dVdx0;
+            } else {
+                rV[j] = 0.0;
+            }
             for (j=jContBC-1; j>0; j--) {
                 rV[j-1] = rV[j] + hh[j-1] * rphalf[j-1] * (drhodt[j-1] + rho[j-1] * beta * U[j-1]);
             }
@@ -247,15 +257,19 @@ void ConvectionSystemUTW::updateContinuityBoundaryCondition
         if (jContBC == 0) {
             // Stagnation point is beyond the left end of the domain
             assert(V[jContBC] <= 0);
-            xVzero = x[0] - V[0]*hh[0]/(V[1]-V[0]);
+            double denom = V[1]-V[0];
+            std::cout << "Warning: Stagnation point is beyond the left end of the domain. Extrapolating to find xVzero." << std::endl;
+            xVzero = (std::abs(denom) > 1e-100) ? x[0] - V[0]*hh[0]/denom : x[0];
         } else if (jContBC == jj) {
             // Stagnation point is beyond the right end of the domain
             assert(V[jContBC] >= 0);
-            xVzero = x[jj] - V[jj]*hh[jj-1]/(V[jj]-V[jj-1]);
+            double denom = V[jj]-V[jj-1];
+            xVzero = (std::abs(denom) > 1e-100) ? x[jj] - V[jj]*hh[jj-1]/denom : x[jj];
         } else {
             // Stagnation point just to the left of jContBC
             assert(V[jContBC] * V[jContBC-1] <= 0); // test opposite sign
-            xVzero = x[jContBC] - V[jContBC] * hh[jContBC-1] / (V[jContBC] - V[jContBC-1]);
+            double denom = V[jContBC] - V[jContBC-1];
+            xVzero = (std::abs(denom) > 1e-100) ? x[jContBC] - V[jContBC] * hh[jContBC-1] / denom : x[jContBC];
         }
 
         break;

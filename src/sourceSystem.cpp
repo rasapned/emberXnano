@@ -44,9 +44,9 @@ double SourceSystem::getQdotIgniter(double t)
     }
 }
 
-void SourceSystem::setOptions(ConfigOptions& options_)
+void SourceSystem::setOptions(ConfigOptions& opts)
 {
-    options = &options_;
+    options = &opts;
 }
 
 void SourceSystem::initialize(size_t new_nSpec)
@@ -123,6 +123,7 @@ void SourceSystemCVODE::setOptions(ConfigOptions& opts)
     }
     integrator->reltol = options->integratorRelTol;
     integrator->minStep = options->integratorMinTimestep;
+    integrator->errorStopCount = options->errorStopCount;
 }
 
 int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
