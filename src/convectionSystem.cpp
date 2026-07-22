@@ -416,8 +416,10 @@ ConvectionSystemSplit::ConvectionSystemSplit()
     : U(0, 0, Stride1X(1 ,1))
     , T(0, 0, Stride1X(1 ,1))
     , Y(0, 0, 0, StrideXX(1 ,1))
+    , moments(0, 0, 0, StrideXX(1 ,1))
     , vInterp(new vecInterpolator())
     , nSpec(0)
+    , nMoments(0)
     , nVars(3)
     , gas(NULL)
     , quasi2d(false)
@@ -431,6 +433,9 @@ void ConvectionSystemSplit::setGrid(const OneDimGrid& grid)
     for (ConvectionSystemY& system : speciesSystems) {
         system.setGrid(grid);
     }
+    for (ConvectionSystemY& system : momentSystems) {
+        system.setGrid(grid);
+    }
 }
 
 void ConvectionSystemSplit::setTolerances(const ConfigOptions& options)
@@ -440,6 +445,7 @@ void ConvectionSystemSplit::setTolerances(const ConfigOptions& options)
     abstolT = options.integratorEnergyAbsTol;
     abstolW = options.integratorSpeciesAbsTol * 20;
     abstolY = options.integratorSpeciesAbsTol;
+    abstolMoment = options.integratorSpeciesAbsTol;
 }
 
 void ConvectionSystemSplit::setGas(CanteraGas& gas_)
@@ -450,7 +456,7 @@ void ConvectionSystemSplit::setGas(CanteraGas& gas_)
 
 void ConvectionSystemSplit::resize
 (const size_t nPointsNew,
- const size_t nSpecNew, dmatrix& state)
+ const size_t nSpecNew, const size_t nMomentsNew, dmatrix& state)
 {
     nPoints = nPointsNew;
     // Create or destroy the necessary speciesSystems if nSpec has changed
@@ -462,9 +468,15 @@ void ConvectionSystemSplit::resize
             gas->getMolecularWeights(W);
         }
     }
+    // Create or destroy the necessary momentSystems if nMoments has changed
+    if (nMoments != nMomentsNew) {
+        momentSystems.resize(nMomentsNew);
+        nMoments = nMomentsNew;
+    }
     remap(state, T, nPoints, kEnergy);
     remap(state, U, nPoints, kMomentum);
     remap(state, Y, nSpec, nPoints, kSpecies);
+    remap(state, moments, nMoments, nPoints, kSpecies + nSpec);
 
     if (speciesSolvers.size() != nSpec) {
         // Create speciesSolvers from scratch if the number of species has changed
@@ -478,6 +490,21 @@ void ConvectionSystemSplit::resize
         for (size_t k=0; k<nSpec; k++) {
             speciesSolvers.replace(k, new SundialsCvode(static_cast<int>(nPointsNew)));
             configureSolver(speciesSolvers[k], k);
+        }
+    }
+
+    if (momentSolvers.size() != nMoments) {
+        // Create momentSolvers from scratch if the number of moments has changed
+        momentSolvers.clear();
+        for (size_t m=0; m<nMoments; m++) {
+            momentSolvers.push_back(new SundialsCvode(static_cast<int>(nPoints)));
+            configureMomentSolver(momentSolvers[m], m);
+        }
+    } else {
+        // Replace the solvers where the number of points has changed
+        for (size_t m=0; m<nMoments; m++) {
+            momentSolvers.replace(m, new SundialsCvode(static_cast<int>(nPointsNew)));
+            configureMomentSolver(momentSolvers[m], m);
         }
     }
 
@@ -510,6 +537,10 @@ void ConvectionSystemSplit::setState(double tInitial)
         Eigen::Map<dvec>(&speciesSolvers[k].y[0], nPoints) = Y.row(k);
     }
 
+    for (size_t m=0; m<nMoments; m++) {
+        Eigen::Map<dvec>(&momentSolvers[m].y[0], nPoints) = moments.row(m);
+    }
+
     // Initialize solvers
     utwSolver->t0 = tInitial;
     utwSolver->maxNumSteps = 1000000;
@@ -522,9 +553,17 @@ void ConvectionSystemSplit::setState(double tInitial)
         solver.minStep = 1e-16;
         solver.initialize();
     }
+
+    for (SundialsCvode& solver : momentSolvers) {
+        solver.t0 = tInitial;
+        solver.maxNumSteps = 1000000;
+        solver.minStep = 1e-16;
+        solver.initialize();
+    }
 }
 
-void ConvectionSystemSplit::setLeftBC(const double Tleft, const dvec& Yleft_)
+void ConvectionSystemSplit::setLeftBC(const double Tleft, const dvec& Yleft_,
+                                       const dvec& momentsLeft_)
 {
     utwSystem.Tleft = Tleft;
     Yleft = Yleft_;
@@ -532,6 +571,11 @@ void ConvectionSystemSplit::setLeftBC(const double Tleft, const dvec& Yleft_)
     utwSystem.Wleft = gas->getMixtureMolecularWeight();
     for (size_t k=0; k<nSpec; k++) {
         speciesSystems[k].Yleft = Yleft[k];
+    }
+
+    momentsLeft = momentsLeft_;
+    for (size_t m=0; m<nMoments; m++) {
+        momentSystems[m].Yleft = momentsLeft[m];
     }
 }
 
@@ -561,6 +605,14 @@ void ConvectionSystemSplit::evaluate()
         speciesSystems[k].f(speciesSolvers[k].tInt, speciesSolvers[k].y, ydotk);
         dYdt.row(k) = Eigen::Map<dvec>(&ydotk[0], nPoints);
     }
+
+    dMomentsDt.resize(nMoments, nPoints);
+    dMomentsDt.setZero();
+    for (size_t m=0; m<nMoments; m++) {
+        momentSystems[m].vInterp = vInterp;
+        momentSystems[m].f(momentSolvers[m].tInt, momentSolvers[m].y, ydotk);
+        dMomentsDt.row(m) = Eigen::Map<dvec>(&ydotk[0], nPoints);
+    }
 }
 
 void ConvectionSystemSplit::setDensityDerivative(const dvec& drhodt)
@@ -581,6 +633,9 @@ void ConvectionSystemSplit::resetSplitConstants()
     for (ConvectionSystemY& system : speciesSystems) {
         system.resetSplitConstants();
     }
+    for (ConvectionSystemY& system : momentSystems) {
+        system.resetSplitConstants();
+    }
 }
 
 void ConvectionSystemSplit::setSplitConstants(const dmatrix& splitConst)
@@ -596,6 +651,10 @@ void ConvectionSystemSplit::setSplitConstants(const dmatrix& splitConst)
 
     for (size_t k=0; k<nSpec; k++) {
         speciesSystems[k].splitConst = splitConst.row(kSpecies+k);
+    }
+
+    for (size_t m=0; m<nMoments; m++) {
+        momentSystems[m].splitConst = splitConst.row(kSpecies + nSpec + m);
     }
 }
 
@@ -625,6 +684,11 @@ void ConvectionSystemSplit::integrateToTime(const double tf)
 
     tbb::parallel_for(tbb::blocked_range<size_t>(0, nSpec, 1),
                       TbbWrapper<ConvectionSystemSplit>(&ConvectionSystemSplit::integrateSpeciesTerms, this));
+
+    if (nMoments > 0) {
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, nMoments, 1),
+                          TbbWrapper<ConvectionSystemSplit>(&ConvectionSystemSplit::integrateMomentTerms, this));
+    }
 }
 
 void ConvectionSystemSplit::integrateSpeciesTerms(size_t k1, size_t k2)
@@ -640,10 +704,25 @@ void ConvectionSystemSplit::integrateSpeciesTerms(size_t k1, size_t k2)
 
 }
 
+void ConvectionSystemSplit::integrateMomentTerms(size_t m1, size_t m2)
+{
+    speciesTimer.start();
+    logFile.verboseWrite("Moments...", false);
+    // Integrate the particle moment (passive scalar) systems
+    for (size_t m=m1; m<m2; m++) {
+        momentSystems[m].vInterp = vInterp;
+        momentSolvers[m].integrateToTime(tStageStop);
+    }
+    speciesTimer.stop();
+}
+
 int ConvectionSystemSplit::getNumSteps()
 {
     int nSteps = utwSolver->getNumSteps();
     for (SundialsCvode& solver : speciesSolvers) {
+        nSteps += solver.getNumSteps();
+    }
+    for (SundialsCvode& solver : momentSolvers) {
         nSteps += solver.getNumSteps();
     }
     return nSteps;
@@ -659,6 +738,10 @@ void ConvectionSystemSplit::unroll_y()
 
     for (size_t k=0; k<nSpec; k++) {
         Y.row(k) = Eigen::Map<dvec>(&speciesSolvers[k].y[0], nPoints);
+    }
+
+    for (size_t m=0; m<nMoments; m++) {
+        moments.row(m) = Eigen::Map<dvec>(&momentSolvers[m].y[0], nPoints);
     }
 }
 
@@ -687,4 +770,19 @@ void ConvectionSystemSplit::configureSolver(SundialsCvode& solver, const size_t 
     speciesSystems[k].resize(nPoints);
     speciesSystems[k].Yleft = Yleft[k];
     speciesSystems[k].k = k;
+}
+
+void ConvectionSystemSplit::configureMomentSolver(SundialsCvode& solver, const size_t m)
+{
+    solver.setODE(&momentSystems[m]);
+    solver.setBandwidth(0,0);
+    solver.reltol = reltol;
+    for (size_t j=0; j<nPoints; j++) {
+        solver.abstol[j] = abstolMoment;
+    }
+    solver.linearMultistepMethod = CV_ADAMS;
+
+    momentSystems[m].resize(nPoints);
+    momentSystems[m].Yleft = momentsLeft[m];
+    momentSystems[m].k = m;
 }

@@ -116,6 +116,9 @@ cdef extern from "readConfig.h":
 
         double centerGridMin
 
+        int nMoments
+        double momentDiffusivity, momentBCLeft, momentBCRight
+
         cbool xFlameControl
         double xFlameInitial, xFlameFinal, xFlameDt, xFlameT0
         double xFlameIntegralGain, xFlameProportionalGain
@@ -207,6 +210,10 @@ cdef extern from "flameSolver.h":
         CxxEigenVecMap T
         CxxEigenVecMap U
         CxxEigenMatrixMap Y
+        CxxEigenMatrixMap moments
+
+        size_t nSpec
+        size_t nMoments
 
         double Tleft
         CxxEigenVec Yleft

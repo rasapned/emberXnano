@@ -169,7 +169,8 @@ public:
     void setGas(CanteraGas& gas);
 
     //! Set the problem size and provide values for the current state variables.
-    void resize(const size_t nPoints, const size_t nSpec, dmatrix& state);
+    void resize(const size_t nPoints, const size_t nSpec, const size_t nMoments,
+               dmatrix& state);
 
     //! Set the state of the internal solvers from the state of the composite
     //! solver.
@@ -178,7 +179,7 @@ public:
     //! Set boundary conditions for temperature and mass fractions left of the
     //! domain when using BoundaryCondition::ControlVolume or
     //! BoundaryCondition::WallFlux.
-    void setLeftBC(const double Tleft, const dvec& Yleft);
+    void setLeftBC(const double Tleft, const dvec& Yleft, const dvec& momentsLeft);
 
     //! Set the mass flux boundary value at j=0.
     void set_rVzero(const double rVzero);
@@ -208,6 +209,9 @@ public:
     //! Integrate the species terms in the range [k1, k2)
     void integrateSpeciesTerms(size_t k1, size_t k2);
 
+    //! Integrate the particle moment (passive scalar) terms in the range [m1, m2)
+    void integrateMomentTerms(size_t m1, size_t m2);
+
 
     //! convert the solver's solution vectors to the full *U*, *Y*, and *T*.
     void unroll_y();
@@ -223,6 +227,7 @@ public:
     VecMap U; //!< normalized tangential velocity (u*a/u_inf) [1/s]
     VecMap T; //!< temperature [K]
     MatrixMap Y; //!< species mass fractions, Y(k,j) [-]
+    MatrixMap moments; //!< particle moment scalars (passive transport), moments(m,j) [-]
     dvec Wmx; //!< Mixture molecular weight [kg/kmol]
 
     // Time derivatives and mass flux are updated by evaluate()
@@ -231,6 +236,7 @@ public:
     dvec dTdt; //!< Time derivative of #T [K/s]
     dvec dWdt; //!< Time derivative of #Wmx [kg/kmol*s]
     dmatrix dYdt; //!< Time derivative of #Y [1/s]
+    dmatrix dMomentsDt; //!< Time derivative of #moments [1/s]
 
     //! System used to solve for #U, #T, and #Wmx
     ConvectionSystemUTW utwSystem;
@@ -244,12 +250,16 @@ private:
     // set parameters of a new species solver
     void configureSolver(SundialsCvode& solver, const size_t k);
 
+    // set parameters of a new particle moment (passive scalar) solver
+    void configureMomentSolver(SundialsCvode& solver, const size_t m);
+
     //! CVODE integration tolerances
     double reltol; //!< relative integrator tolerance
     double abstolU; //!< velocity absolute tolerance
     double abstolT; //!< temperature absolute tolerance
     double abstolW; //!< molecular weight absolute tolerance
     double abstolY; //!< mass fraction absolute tolerance
+    double abstolMoment; //!< particle moment scalar absolute tolerance
 
     //! Solver for #utwSystem
     std::shared_ptr<SundialsCvode> utwSolver;
@@ -260,13 +270,25 @@ private:
     //! Solvers for system in #speciesSystems
     boost::ptr_vector<SundialsCvode> speciesSolvers;
 
+    //! Systems used to solve the convection term for each particle moment
+    //! (passive scalar).
+    boost::ptr_vector<ConvectionSystemY> momentSystems;
+
+    //! Solvers for systems in #momentSystems
+    boost::ptr_vector<SundialsCvode> momentSolvers;
+
     //! Mass fraction left of the domain. Used with
     //! BoundaryCondition::ControlVolume and BoundaryCondition::WallFlux.
     dvec Yleft;
 
+    //! Particle moment scalar values left of the domain. Used with
+    //! BoundaryCondition::ControlVolume and BoundaryCondition::WallFlux.
+    dvec momentsLeft;
+
     dvec W; //!< Molecular weight of each species [kg/kmol]
 
     size_t nSpec; //!< Number of species
+    size_t nMoments; //!< Number of particle moment (passive scalar) variables
     size_t nVars; //!< Number of state variables in the UTW system (`==3`)
 
     CanteraGas* gas; //!< Cantera object used for computing #Wmx

@@ -213,4 +213,10 @@ public:
 
     bool xStagControl;
     double xStag;
+
+    // NEW! Particles: particle moment (passive scalar) transport [see input.py Particles]
+    int nMoments; //!< [particles.nMoments] Number of particle moment scalars
+    double momentDiffusivity; //!< [particles.momentDiffusivity] Diffusivity of moment scalars [m^2/s]
+    double momentBCLeft; //!< [particles.momentBCLeft] Fixed left boundary value
+    double momentBCRight; //!< [particles.momentBCRight] Fixed right boundary value
 };

@@ -437,6 +437,34 @@ class Grid(Options):
     centerGridMin = FloatOption(1e-4, min=0, level=2, filter=_isSymmetric)
 
 
+class Particles(Options):
+    """
+    Settings controlling the (currently passive-scalar) transport of
+    particle "moments" -- extra scalar fields transported alongside the
+    normal state variables (temperature, velocity, species). This is a
+    first step toward a full population-balance model for nanoparticles
+    (number density, volume density, composition, etc.), coupled two-way
+    with the gas phase. For now, no source terms (nucleation, coagulation,
+    surface reactions, ...) are implemented -- the moments are purely
+    advected and diffused.
+    """
+
+    #: Number of particle moment scalars to transport. Set to 0 (default)
+    #: to disable the particle module entirely.
+    nMoments = IntegerOption(0, min=0)
+
+    #: Diffusivity used for all particle moment scalars [m^2/s].
+    momentDiffusivity = FloatOption(1e-5, min=0, level=1)
+
+    #: Fixed value imposed at the left boundary of the domain when the
+    #: left boundary condition is of type 'FixedValue'.
+    momentBCLeft = FloatOption(0.0, level=1)
+
+    #: Fixed value imposed at the right boundary of the domain when the
+    #: right boundary condition is of type 'FixedValue'.
+    momentBCRight = FloatOption(0.0, level=1)
+
+
 class InitialCondition(Options):
     """
     Settings controlling the initial condition for the integrator. If
@@ -884,6 +912,7 @@ class Config(object):
         self.general = get(General)
         self.chemistry = get(Chemistry)
         self.grid = get(Grid)
+        self.particles = get(Particles)
         self.initialCondition = get(InitialCondition)
         self.wallFlux = opts.get('WallFlux')
         self.ignition = get(Ignition)

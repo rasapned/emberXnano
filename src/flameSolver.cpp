@@ -5,6 +5,7 @@ FlameSolver::FlameSolver()
     : U(0, 0, Stride1X(1 ,1))
     , T(0, 0, Stride1X(1 ,1))
     , Y(0, 0, 0, StrideXX(1 ,1))
+    , moments(0, 0, 0, StrideXX(1 ,1))
     , jCorrSolver(jCorrSystem)
     , strainfunc(NULL)
     , rateMultiplierFunction(NULL)
@@ -57,16 +58,21 @@ void FlameSolver::initialize(void)
     // Cantera initialization
     gas.initialize();
     nSpec = gas.nSpec;
-    nVars = nSpec + 2;
+    nMoments = options.nMoments;
+    kMoments = kSpecies + nSpec;
+    nVars = nSpec + 2 + nMoments;
     W.resize(nSpec);
     gas.getMolecularWeights(W);
+    // Set boundary conditions for particles (vector of nMoments values, each equal to opitions.<...>)
+    momentsLeft = dvec::Constant(nMoments, options.momentBCLeft);
+    momentsRight = dvec::Constant(nMoments, options.momentBCRight);
 
     // Get Initial Conditions
     loadProfile();
 
     grid.setSize(x.size());
     convectionSystem.setGas(gas);
-    convectionSystem.setLeftBC(Tleft, Yleft);
+    convectionSystem.setLeftBC(Tleft, Yleft, momentsLeft);
     convectionSystem.setTolerances(options);
 
     for (size_t k=0; k<nVars; k++) {
@@ -133,11 +139,17 @@ void FlameSolver::setupStep()
     if (grid.leftBC == BoundaryCondition::FixedValue) {
         T(0) = Tleft;
         Y.col(0) = Yleft;
+        if (nMoments > 0) {
+            moments.col(0) = momentsLeft;
+        }
     }
 
     if (grid.rightBC == BoundaryCondition::FixedValue) {
         T(jj) = Tright;
         Y.col(jj) = Yright;
+        if (nMoments > 0) {
+            moments.col(jj) = momentsRight;
+        }
     }
 
     updateChemicalProperties();
@@ -170,6 +182,13 @@ void FlameSolver::prepareIntegrators()
             diffusionTerms[kSpecies+k].B =rho.inverse();
             diffusionTerms[kSpecies+k].D = rhoD.row(k);
         }
+
+        // Diffusion solvers: Particle moments (passive scalars)
+        for (size_t m=0; m<nMoments; m++) {
+            DiffusionSystem& sys = diffusionTerms[kMoments+m];
+            sys.B = rho.inverse();
+            sys.D.setConstant(nPoints, options.momentDiffusivity);
+        }
     } else {
         // Diffusion solvers: Energy and momentum
         diffusionTerms[kMomentum].B.setZero(nPoints);
@@ -186,6 +205,15 @@ void FlameSolver::prepareIntegrators()
                 sys.B[j] = 1 / (rho[j] * vzInterp->get(x[j], tNow));
             }
         }
+
+        // Diffusion solvers: Particle moments (passive scalars)
+        for (size_t m=0; m<nMoments; m++) {
+            DiffusionSystem& sys = diffusionTerms[kMoments+m];
+            sys.D.setConstant(nPoints, options.momentDiffusivity);
+            for (size_t j = 0; j <= jj; j++) {
+                sys.B[j] = 1 / (rho[j] * vzInterp->get(x[j], tNow));
+            }
+        }
     }
 
     setDiffusionSolverState(tNow);
@@ -196,7 +224,10 @@ void FlameSolver::prepareIntegrators()
     // Production terms
     setProductionSolverState(tNow);
     for (size_t j=0; j<nPoints; j++) {
-        sourceTerms[j].splitConst = splitConstProd.col(j);
+        // Only the temperature, momentum, and species rows are relevant to
+        // the (chemistry) source term integrator. Passive scalars (particle
+        // moments) are not modified by the production step. Remove head for activating source terms for particles.
+        sourceTerms[j].splitConst = splitConstProd.col(j).head(nSpec + 2);
     }
 
     // Convection terms
@@ -206,7 +237,8 @@ void FlameSolver::prepareIntegrators()
         ddt += ddtCross;
     }
 
-    dvec tmp = (W.inverse().matrix().transpose() * ddt.bottomRows(nSpec).matrix()).array();
+    // Change bottomRows to middleRows (now we also have particle moments at the bottom)
+    dvec tmp = (W.inverse().matrix().transpose() * ddt.middleRows(kSpecies, nSpec).matrix()).array();
     drhodt = - rho * (ddt.row(kEnergy).transpose() / T + tmp * Wmx);
 
     assert(mathUtils::notnan(drhodt));
@@ -458,7 +490,10 @@ void FlameSolver::resizeAuxiliary()
     resizeMappedArrays();
 
     ddtCross.topRows(2).setZero();
-    ddtCross.bottomRows(nSpec) *= NaN;
+    ddtCross.middleRows(kSpecies, nSpec) *= NaN;
+    if (nMoments > 0) {
+        ddtCross.middleRows(kMoments, nMoments).setZero();
+    }
 
     rho.setZero(nPoints);
     drhodt.setZero(nPoints);
@@ -520,8 +555,8 @@ void FlameSolver::resizeAuxiliary()
     }
 
     convectionSystem.setGrid(grid);
-    convectionSystem.resize(nPoints, nSpec, state);
-    convectionSystem.setLeftBC(Tleft, Yleft);
+    convectionSystem.resize(nPoints, nSpec, nMoments, state);
+    convectionSystem.setLeftBC(Tleft, Yleft, momentsLeft);
 
     convectionSystem.utwSystem.setStrainFunction(strainfunc);
     convectionSystem.utwSystem.setRhou(rhou);
@@ -546,6 +581,7 @@ void FlameSolver::resizeMappedArrays()
     remap(state, T, nPoints, kEnergy);
     remap(state, U, nPoints, kMomentum);
     remap(state, Y, nSpec, nPoints, kSpecies);
+    remap(state, moments, nMoments, nPoints, kMoments);
 }
 
 void FlameSolver::updateCrossTerms()
@@ -588,7 +624,7 @@ void FlameSolver::updateCrossTerms()
     jCorr = jCorrSolver.y;
 
     // dYdt due to gradients in other species and temperature
-    Eigen::Block<dmatrix> dYdtCross = ddtCross.bottomRows(nSpec);
+    Eigen::Block<dmatrix> dYdtCross = ddtCross.middleRows(kSpecies, nSpec);
 
     // dTdt due to gradients in species composition
     Eigen::Block<dmatrix, 1> dTdtCross = ddtCross.row(kEnergy);
@@ -976,6 +1012,9 @@ void FlameSolver::loadProfile(void)
         Y = options.Y_initial.transpose();
     } else {
         Y = options.Y_initial;
+    }
+    if (nMoments > 0) {
+        moments.setZero();
     }
     convectionSystem.V = options.V_initial;
     convectionSystem.utwSystem.V = options.V_initial;

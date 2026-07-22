@@ -300,6 +300,12 @@ cdef class ConfigOptions:
         opts.addPointCount = self.grid.addPointCount
         opts.unstrainedDownstreamWidth = self.grid.unstrainedDownstreamWidth
 
+        # Particles (passive scalar moment transport)
+        opts.nMoments = self.particles.nMoments
+        opts.momentDiffusivity = self.particles.momentDiffusivity
+        opts.momentBCLeft = self.particles.momentBCLeft
+        opts.momentBCRight = self.particles.momentBCRight
+
         # Times
         opts.tStart, opts.haveTStart = get(self.times.tStart, 0.0)
         opts.regridTimeInterval = self.times.regridTimeInterval
@@ -582,6 +588,18 @@ cdef class FlameSolver:
         def __get__(self):
             return getArray_MatrixMap(self.solver.Y)
 
+    property moments:
+        def __get__(self):
+            return getArray_MatrixMap(self.solver.moments)
+
+    property nSpec:
+        def __get__(self):
+            return self.solver.nSpec
+
+    property nMoments:
+        def __get__(self):
+            return self.solver.nMoments
+
     property V:
         def __get__(self):
             return getArray_Vec(self.solver.convectionSystem.V)
@@ -648,19 +666,19 @@ cdef class FlameSolver:
 
     property dYdtDiff:
         def __get__(self):
-            return getArray_Matrix(self.solver.ddtDiff)[2:]
+            return getArray_Matrix(self.solver.ddtDiff)[2:2+self.solver.nSpec]
 
     property dYdtConv:
         def __get__(self):
-            return getArray_Matrix(self.solver.ddtConv)[2:]
+            return getArray_Matrix(self.solver.ddtConv)[2:2+self.solver.nSpec]
 
     property dYdtProd:
         def __get__(self):
-            return getArray_Matrix(self.solver.ddtProd)[2:]
+            return getArray_Matrix(self.solver.ddtProd)[2:2+self.solver.nSpec]
 
     property dYdtCross:
         def __get__(self):
-            return getArray_Matrix(self.solver.ddtCross)[2:]
+            return getArray_Matrix(self.solver.ddtCross)[2:2+self.solver.nSpec]
 
     property dWdt:
         def __get__(self):

@@ -107,6 +107,10 @@ class StateWriter(object):
             data['fileNumber'] = self.fileNumber
             self.write(data, ['x', 'T', 'U', 'Y', 'V', 'gridAlpha', 'a', 'dadt'])
 
+            # Particle moment scalars (passive-scalar transport), if enabled
+            if self.solver.nMoments > 0:
+                self.write(data, ['moments'])
+
             # extended information
             if self.options.outputFiles.heatReleaseRate or errorFile:
                 data['q'] = self.solver.qDot

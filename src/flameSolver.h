@@ -84,6 +84,7 @@ public:
     double rhou, rhob, rhoLeft, rhoRight;
     double Tleft, Tright;
     dvec Yleft, Yright;
+    dvec momentsLeft, momentsRight; //!< Fixed boundary values for particle moment scalars
 
     void setupStep();
     void prepareIntegrators();
@@ -112,12 +113,15 @@ public:
     void integrateDiffusionTerms(size_t k1, size_t k2);
 
     size_t nSpec; //!< Number of chemical species
-    size_t nVars; //!< Number of state variables at each grid point (nSpec + 2)
+    size_t nMoments; //!< Number of particle moment (passive scalar) variables
+    size_t kMoments; //!< Row index of the first moment variable in `state` (== nSpec + 2)
+    size_t nVars; //!< Number of state variables at each grid point (nSpec + 2 + nMoments)
 
     // State variables:
     VecMap U; //!< normalized tangential velocity (u*a/u_inf) [1/s]
     VecMap T; //!< temperature [K]
     MatrixMap Y; //!< species mass fractions, Y(k,j) [-]
+    MatrixMap moments; //!< particle moment scalars (passive transport), moments(m,j) [-]
 
     // Auxiliary variables:
     dvec rho; //!< density [kg/m^3]
