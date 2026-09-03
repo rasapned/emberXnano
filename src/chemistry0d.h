@@ -186,6 +186,14 @@ public:
     void setStateMass(const dvec& Y, const double T);
     void setStateMass(const double* Y, const double T);
 
+    //! Set the thermodynamic state using mass fractions that are NOT
+    //! required to sum to 1 (Cantera's `setMassFractions_NoNorm`). Used when
+    //! some gas mass has been permanently converted to particle mass (e.g.
+    //! by nucleation), so that Y is allowed to sum to less than 1 without
+    //! Cantera silently renormalizing it back.
+    void setStateMassNoNorm(const dvec& Y, const double T);
+    void setStateMassNoNorm(const double* Y, const double T);
+
     void setStateMole(const dvec& X, const double T);
     void setStateMole(const double* X, const double T);
 

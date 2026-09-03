@@ -23,8 +23,9 @@ public:
     //! @param uu        tangential velocity
     //! @param tt        temperature
     //! @param yy        vector of species mass fractions
+    //! @param mm        vector of particle moment scalars (N, V, ...)
     virtual void setState(double tInitial, double uu, double tt,
-                          const dvec& yy) = 0;
+                          const dvec& yy, const dvec& mm) = 0;
 
     //! Take as many steps as needed to reach `tf`.
     //! `tf` is relative to `tInitial`.
@@ -53,12 +54,22 @@ public:
     //! ignition source.
     double getQdotIgniter(double t);
 
+    //! Evaluate all configured nucleation channels (see `options->nucSpeciesA`
+    //! etc.) at the current state (T, Y, rho). Fills in the production (Q)
+    //! and destruction (D) rates for the particle moments and gas species so
+    //! that `ydot = Q - D` for each. Shared by both SourceSystemCVODE::f()
+    //! and SourceSystemQSS::odefun(). By construction (see readConfig.h),
+    //! particleDensity * dV/dt == total consumed species mass rate
+    //! identically, so that sum(Y) + particleDensity*V is an exact invariant.
+    void computeNucleationRates(dvec& momentsQ, dvec& momentsD,
+                                dvec& speciesQ, dvec& speciesD);
+
     //! Set the CanteraGas object to use for thermodynamic and kinetic property
     //! calculations.
     void setGas(CanteraGas* _gas) { gas = _gas; }
 
-    //! Resize internal arrays for a problem of the specified size (`nSpec+2`)
-    virtual void initialize(size_t nSpec);
+    //! Resize internal arrays for a problem of the specified size (`nSpec+2+nMoments`)
+    virtual void initialize(size_t nSpec, size_t nMoments);
 
     //! Set integrator tolerances and other parameters
     virtual void setOptions(ConfigOptions& options_);
@@ -99,6 +110,7 @@ public:
     double U; //!< tangential velocity
     double T; //!< temperature
     dvec Y; //!< species mass fraction
+    dvec moments; //!< particle moment scalars (N, V, ...)
 
     //! Extra constant term introduced by splitting
     dvec splitConst;
@@ -129,6 +141,7 @@ protected:
     IntegratorCallback* heatLoss;
 
     size_t nSpec; //!< number of species
+    size_t nMoments; //!< number of particle moment (N, V, ...) variables
     int j; //!< grid index for this system
     double x; //!< grid position for this system
     double rhou; //!< density of the unburned gas
@@ -174,7 +187,8 @@ public:
     int fdJacobian(const realtype t, const sdVector& y,
                    const sdVector& ydot, sdMatrix& J);
 
-    void setState(double tInitial, double uu, double tt, const dvec& yy);
+    void setState(double tInitial, double uu, double tt, const dvec& yy,
+                 const dvec& mm);
 
     int integrateToTime(double tf);
     int integrateOneStep(double tf);
@@ -195,7 +209,7 @@ public:
     void roll_ydot(sdVector& ydot) const;
 
     std::string getStats();
-    void initialize(size_t nSpec);
+    void initialize(size_t nSpec, size_t nMoments);
     void setOptions(ConfigOptions& options);
 
     virtual void writeState(std::ostream& out, bool init);
@@ -206,6 +220,7 @@ public:
     double dUdt; //!< time derivative of the tangential velocity
     double dTdt; //!< time derivative of the temperature
     dvec dYdt; //!< time derivative of the species mass fractions
+    dvec dMomentsdt; //!< time derivative of the particle moment scalars
     dvec wDot; //!< species net production rates [kmol/m^3*s]
 
 private:
@@ -245,10 +260,11 @@ public:
     //! each component. The net time derivative is `ydot = q - d`.
     void roll_ydot(dvec& q, dvec& d) const;
 
-    void initialize(size_t nSpec);
+    void initialize(size_t nSpec, size_t nMoments);
     void setOptions(ConfigOptions& options);
 
-    void setState(double tStart, double uu, double tt, const dvec& yy);
+    void setState(double tStart, double uu, double tt, const dvec& yy,
+                 const dvec& mm);
     int integrateToTime(double tf) { return integrator.integrateToTime(tf); }
     int integrateOneStep(double tf) { return integrator.integrateOneStep(tf); }
 
@@ -261,6 +277,8 @@ public:
     double dTdtD; //!< temperature "destruction" rate
     dvec dYdtQ; //!< species mass fraction creation rate
     dvec dYdtD; //!< species mass fraction destruction rate
+    dvec dMomentsdtQ; //!< particle moment "creation" rate
+    dvec dMomentsdtD; //!< particle moment "destruction" rate
 
     double tCall; //!< the last time at which odefun was called
     dvec wDotQ, wDotD; //!< species production / destruction rates [kmol/m^3*s]

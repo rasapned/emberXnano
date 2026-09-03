@@ -5,6 +5,7 @@ import numpy as np
 cimport numpy as np
 import os
 import sys
+import cantera
 
 from cython.operator cimport dereference as deref
 from ._ember cimport *
@@ -164,6 +165,18 @@ def addCanteraDirectory(dirname):
     CxxAddCanteraDirectory(stringify(dirname))
 
 
+def _speciesCollisionProperties(gas, name):
+    """(index, collision diameter [m], molecular mass [kg/molecule]) for *name*."""
+    k = gas.species_index(name)
+    transport = gas.species(k).transport
+    if transport is None or transport.diameter is None:
+        raise ValueError("Species '%s' has no transport data (collision"
+                         " diameter) in the mechanism." % name)
+    d = transport.diameter
+    m = gas.molecular_weights[k] / cantera.avogadro
+    return k, d, m
+
+
 def writelog(text):
     CxxSingletonLogfile.write(stringify(text))
 
@@ -305,6 +318,83 @@ cdef class ConfigOptions:
         opts.momentDiffusivity = self.particles.momentDiffusivity
         opts.momentBCLeft = self.particles.momentBCLeft
         opts.momentBCRight = self.particles.momentBCRight
+
+        # Particle nucleation source terms (two-way coupled with the gas phase)
+        particleDensity = self.particles.particleDensity
+        if self.particles.particlePhaseName:
+            try:
+                particlePhase = cantera.Solution(self.chemistry.mechanismFile,
+                                                 self.particles.particlePhaseName)
+                particleDensity = particlePhase.density
+            except Exception as e:
+                print("Warning: could not find particle phase '%s' in '%s' (%s)."
+                      " Falling back to particles.particleDensity = %g kg/m^3." %
+                      (self.particles.particlePhaseName, self.chemistry.mechanismFile,
+                       e, particleDensity))
+        opts.particleDensity = particleDensity
+
+        nucleation = self.particles.nucleation
+        if nucleation is not None:
+            nucleation.validate(self.gas)
+
+            nucSpeciesA, nucSpeciesB = [], []
+            nucStoichA, nucStoichB = [], []
+            nucVolumePerEvent = []
+            nucCollisionPrefactor = []
+            stoichA = nucleation.stoichA.value
+            stoichB = nucleation.stoichB.value
+            for nameA, nameB in zip(nucleation.collisionSpeciesA.value,
+                                    nucleation.collisionSpeciesB.value):
+                kA, dA, mA = _speciesCollisionProperties(self.gas, nameA)
+                kB, dB, mB = _speciesCollisionProperties(self.gas, nameB)
+                WA = self.gas.molecular_weights[kA]
+                WB = self.gas.molecular_weights[kB]
+
+                dAB = 0.5 * (dA + dB)
+                muAB = mA * mB / (mA + mB)
+                # Hard-sphere kinetic collision prefactor, everything except
+                # sqrt(T) and the (state-dependent) concentrations -- see
+                # sourceSystem.cpp::computeNucleationRates().
+                prefactor = ((np.pi / 4.0) * dAB**2 *
+                             np.sqrt(8.0 * cantera.boltzmann / (np.pi * muAB)) *
+                             cantera.avogadro)
+
+                nucSpeciesA.append(kA)
+                nucSpeciesB.append(kB)
+                nucStoichA.append(stoichA)
+                nucStoichB.append(stoichB)
+                nucCollisionPrefactor.append(prefactor)
+                # Always derived, never user-specified: this is what preserves
+                # the exact invariant sum(Y) + particleDensity*V == 1.
+                nucVolumePerEvent.append((stoichA * WA + stoichB * WB) / particleDensity)
+
+            opts.nucSpeciesA = nucSpeciesA
+            opts.nucSpeciesB = nucSpeciesB
+            opts.nucStoichA = nucStoichA
+            opts.nucStoichB = nucStoichB
+            opts.nucVolumePerEvent = nucVolumePerEvent
+            opts.nucCollisionPrefactor = nucCollisionPrefactor
+
+            nucPrecursorSpecies = []
+            nucPrecursorAtomCount = []
+            nucMonomerIndex = -1
+            for name in nucleation.precursorSpecies.value:
+                k = self.gas.species_index(name)
+                atomCount = int(next(iter(self.gas.species(k).composition.values())))
+                if atomCount == 1:
+                    nucMonomerIndex = len(nucPrecursorSpecies)
+                nucPrecursorSpecies.append(k)
+                nucPrecursorAtomCount.append(atomCount)
+
+            opts.nucPrecursorSpecies = nucPrecursorSpecies
+            opts.nucPrecursorAtomCount = nucPrecursorAtomCount
+            opts.nucMonomerIndex = nucMonomerIndex
+
+            A, B, C = nucleation.antoineCoeffs.value
+            opts.nucAntoineA, opts.nucAntoineB, opts.nucAntoineC = A, B, C
+            sA, sB = nucleation.surfaceTensionCoeffs.value
+            opts.nucSurfaceTensionA, opts.nucSurfaceTensionB = sA, sB
+
 
         # Times
         opts.tStart, opts.haveTStart = get(self.times.tStart, 0.0)

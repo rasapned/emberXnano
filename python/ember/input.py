@@ -437,6 +437,74 @@ class Grid(Options):
     centerGridMin = FloatOption(1e-4, min=0, level=2, filter=_isSymmetric)
 
 
+class NucleationChannel(Options):
+    """
+    Two-way coupled gas-to-particle nucleation. Both mechanisms below may be
+    enabled at once; each contributes production to the N and V moments
+    (and consumes gas species) in
+    ``src/sourceSystem.cpp::computeNucleationRates()``.
+    """
+    # ========= Collision-based nucleation ===========
+
+    #: Lists of colliding gas species pairs: channel i pairs
+    #: ``collisionSpeciesA[i]`` with ``collisionSpeciesB[i]`` (equal for a
+    #: homomolecular collision, e.g. Fe + Fe). Must be the same length.
+    #: Collision diameters and molecular masses are looked up from the
+    #: mechanism's transport data.
+    collisionSpeciesA = Option([])
+    collisionSpeciesB = Option([])
+
+    #: Stoichiometric coefficient of *collisionSpeciesA*/*collisionSpeciesB*
+    #: consumed per event (applied uniformly to all channels).
+    stoichA = IntegerOption(1, min=1)
+    stoichB = IntegerOption(1, min=1)
+
+    # ======== Classical nucleation theory (CNT) =========
+
+    #: List of precursor (cluster) species of a single element present in
+    #: the mechanism (e.g. Fe, Fe2, Fe3, ...).
+    precursorSpecies = Option([])
+
+    #: Antoine coefficients [A, B, C] for the precursor's saturation vapor
+    #: pressure: log10(P[bar]) = A - B/(C + T[degC]).
+    antoineCoeffs = Option([4.185, 1660.0, -45.0], level=2)
+
+    #: Surface tension coefficients [A, B]: sigma = A + B*T, T in Kelvin,
+    #: sigma in N/m.
+    surfaceTensionCoeffs = Option([1.0, 0.0], level=2)
+
+    def validate(self, gas):
+        """Cross-check list lengths/composition against the mechanism *gas*."""
+        if len(self.collisionSpeciesA.value) != len(self.collisionSpeciesB.value):
+            raise ValueError(
+                "Particles.nucleation: collisionSpeciesA and collisionSpeciesB"
+                " must have the same length (%d != %d)." %
+                (len(self.collisionSpeciesA.value), len(self.collisionSpeciesB.value)))
+
+        element = None
+        haveMonomer = False
+        for name in self.precursorSpecies.value:
+            composition = gas.species(name).composition
+            if len(composition) != 1:
+                raise ValueError(
+                    "Particles.nucleation: precursor species '%s' must be"
+                    " composed of a single element; found %r." % (name, composition))
+            el, count = next(iter(composition.items()))
+            if count == 1:
+                haveMonomer = True
+            if element is None:
+                element = el
+            elif el != element:
+                raise ValueError(
+                    "Particles.nucleation: all precursorSpecies must be"
+                    " clusters of the same element (got '%s' and '%s')." %
+                    (element, el))
+        if self.precursorSpecies.value and not haveMonomer:
+            raise ValueError(
+                "Particles.nucleation: precursorSpecies must include the"
+                " monomer (single-atom) species, e.g. 'Fe'.")
+
+
 class Particles(Options):
     """
     Settings controlling the (currently passive-scalar) transport of
@@ -463,6 +531,22 @@ class Particles(Options):
     #: Fixed value imposed at the right boundary of the domain when the
     #: right boundary condition is of type 'FixedValue'.
     momentBCRight = FloatOption(0.0, level=1)
+
+    #: Two-way coupled gas-to-particle nucleation source terms (collision
+    #: and/or classical nucleation theory channels). ``None`` (default)
+    #: means no nucleation -- moments remain purely advected/diffused.
+    nucleation = Option(None)
+
+    #: Bulk density of the particle material [kg/m^3], used to convert
+    #: between consumed gas mass and particle volume. Used directly unless
+    #: *particlePhaseName* is set and successfully found in the mechanism.
+    particleDensity = FloatOption(7874.0, min=0)
+
+    #: Optional name of a condensed (solid) phase defined in the mechanism
+    #: file, used to look up *particleDensity* automatically instead of
+    #: using the manually-specified value. Falls back to *particleDensity*
+    #: with a warning if the phase cannot be found.
+    particlePhaseName = StringOption(None, level=1)
 
 
 class InitialCondition(Options):

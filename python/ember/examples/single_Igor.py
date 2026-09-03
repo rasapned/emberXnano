@@ -13,7 +13,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/single_Igor'
+output = 'run/test'
 
 # Set strain rate (1/s) for the counterflow flame
 a = 150.0
@@ -85,7 +85,7 @@ conf = Config(
 
 # Run the simulation and plot the results
 if __name__ == '__main__':
-    #conf.run()
+    conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 

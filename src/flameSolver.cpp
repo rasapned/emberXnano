@@ -224,10 +224,7 @@ void FlameSolver::prepareIntegrators()
     // Production terms
     setProductionSolverState(tNow);
     for (size_t j=0; j<nPoints; j++) {
-        // Only the temperature, momentum, and species rows are relevant to
-        // the (chemistry) source term integrator. Passive scalars (particle
-        // moments) are not modified by the production step. Remove head for activating source terms for particles.
-        sourceTerms[j].splitConst = splitConstProd.col(j).head(nSpec + 2);
+        sourceTerms[j].splitConst = splitConstProd.col(j);
     }
 
     // Convection terms
@@ -527,7 +524,7 @@ void FlameSolver::resizeAuxiliary()
             }
             // initialize the new SourceSystem
             system->setGas(&gas);
-            system->initialize(nSpec);
+            system->initialize(nSpec, nMoments);
             system->setOptions(options);
             system->setTimers(&reactionRatesTimer, &thermoTimer, &jacobianTimer);
             system->setRateMultiplierFunction(rateMultiplierFunction);
@@ -760,7 +757,7 @@ void FlameSolver::setProductionSolverState(double tInitial)
 {
     splitTimer.resume();
     for (size_t j=0; j<nPoints; j++) {
-        sourceTerms[j].setState(tInitial, U(j), T(j), Y.col(j));
+        sourceTerms[j].setState(tInitial, U(j), T(j), Y.col(j), moments.col(j));
     }
     splitTimer.stop();
 }
@@ -829,6 +826,9 @@ void FlameSolver::integrateProductionTerms(size_t j1, size_t j2)
             U(j) = sourceTerms[j].U;
             T(j) = sourceTerms[j].T;
             Y.col(j) = sourceTerms[j].Y;
+            if (nMoments > 0) {
+                moments.col(j) = sourceTerms[j].moments;
+            }
         } else {
             // Print gas mole fractions to help identify problematic reactions
             dvec X0(nSpec), X1(nSpec);
@@ -974,6 +974,12 @@ void FlameSolver::calculateQdot()
 void FlameSolver::correctMassFractions() {
     setupTimer.resume();
     for (size_t j=0; j<nPoints; j++) {
+        // Density is an intensive property of the gas phase and must be
+        // computed from a properly normalized composition, so Y is always
+        // renormalized to sum to 1 here regardless of nucleation activity.
+        // Species consumed by nucleation are still depleted correctly by
+        // their own (negative) production term in computeNucleationRates();
+        // this only removes numerical round-off drift.
         gas.setStateMass(&Y(0,j), T(j));
         gas.getMassFractions(&Y(0,j));
     }

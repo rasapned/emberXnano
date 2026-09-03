@@ -9,6 +9,14 @@ const size_t kEnergy = 1;
 const size_t kSpecies = 2;
 const size_t kWmx = 2; // never used in the same systems as kSpecies
 
+// Particle moment indices, relative to the start of the moment block
+// (i.e. row kSpecies+nSpec in the full state vector). Fixed convention:
+// index 0 = N (particle number density), index 1 = V (particle volume
+// density). A third index (Vzeta, in-particle oxygen) is reserved for
+// later but not yet implemented.
+const size_t kN = 0;
+const size_t kV = 1;
+
 //! Possible boundary conditions for the continuity equations
 namespace ContinuityBoundaryCondition {
     enum BC {
@@ -219,4 +227,45 @@ public:
     double momentDiffusivity; //!< [particles.momentDiffusivity] Diffusivity of moment scalars [m^2/s]
     double momentBCLeft; //!< [particles.momentBCLeft] Fixed left boundary value
     double momentBCRight; //!< [particles.momentBCRight] Fixed right boundary value
+    // Particle nucleation source terms (two-way coupled with the gas phase)
+    // [particles.particleDensity]
+    double particleDensity; //!< Bulk density of the particle material [kg/m^3]
+
+    //! Collision-based nucleation channels (parallel arrays, one entry per
+    //! channel). Channel c consumes gas species nucSpeciesA[c] (stoichiometry
+    //! nucStoichA[c]) and nucSpeciesB[c] (stoichiometry nucStoichB[c]; may
+    //! equal speciesA for a homomolecular collision) to form
+    //! nucVolumePerEvent[c] [m^3] of new particle volume per nucleation
+    //! event. nucVolumePerEvent is ALWAYS derived (in Python) from the
+    //! consumed species' molecular weights and particleDensity so that
+    //! particleDensity * dV/dt equals the mass consumption rate identically
+    //! -- this is what makes sum(Y) + particleDensity*V == 1 an exact
+    //! invariant of the coupled ODE. nucCollisionPrefactor[c] is the
+    //! hard-sphere kinetic collision prefactor (diameter/reduced-mass terms,
+    //! independent of local state) precomputed once in Python from the
+    //! mechanism's transport data; only sqrt(T) and the concentrations need
+    //! to be evaluated at each grid point/timestep.
+    std::vector<int> nucSpeciesA, nucSpeciesB;
+    std::vector<int> nucStoichA, nucStoichB;
+    std::vector<double> nucVolumePerEvent;
+    std::vector<double> nucCollisionPrefactor;
+
+    //! Classical nucleation theory (CNT), for a single monomer material
+    //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in
+    //! nucPrecursorSpecies, with nucPrecursorAtomCount giving the number of
+    //! monomer units in each cluster (index nucMonomerIndex is the monomer
+    //! itself, atom count == 1). The monomer mass/volume used by the CNT
+    //! rate are derived at runtime from W[nucPrecursorSpecies[nucMonomerIndex]]
+    //! and particleDensity -- not a separate user input.
+    std::vector<int> nucPrecursorSpecies;
+    std::vector<int> nucPrecursorAtomCount;
+    int nucMonomerIndex;
+
+    //! Antoine equation coefficients for the precursor's saturation vapor
+    //! pressure: log10(Psat[bar]) = A - B/(C + T[degC]).
+    double nucAntoineA, nucAntoineB, nucAntoineC;
+
+    //! Surface tension as a linear function of temperature [K]:
+    //! sigma = nucSurfaceTensionA + nucSurfaceTensionB * T.
+    double nucSurfaceTensionA, nucSurfaceTensionB;
 };

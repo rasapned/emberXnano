@@ -119,6 +119,18 @@ cdef extern from "readConfig.h":
         int nMoments
         double momentDiffusivity, momentBCLeft, momentBCRight
 
+        double particleDensity
+        vector[int] nucSpeciesA, nucSpeciesB
+        vector[int] nucStoichA, nucStoichB
+        vector[double] nucVolumePerEvent
+        vector[double] nucCollisionPrefactor
+
+        vector[int] nucPrecursorSpecies
+        vector[int] nucPrecursorAtomCount
+        int nucMonomerIndex
+        double nucAntoineA, nucAntoineB, nucAntoineC
+        double nucSurfaceTensionA, nucSurfaceTensionB
+
         cbool xFlameControl
         double xFlameInitial, xFlameFinal, xFlameDt, xFlameT0
         double xFlameIntegralGain, xFlameProportionalGain

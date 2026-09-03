@@ -481,6 +481,18 @@ void CanteraGas::setStateMass(const double* Y, const double T)
     thermo->setState_TPY(T, pressure, Y);
 }
 
+void CanteraGas::setStateMassNoNorm(const dvec& Y, const double T)
+{
+    thermo->setMassFractions_NoNorm(Y.data());
+    thermo->setState_TP(T, pressure);
+}
+
+void CanteraGas::setStateMassNoNorm(const double* Y, const double T)
+{
+    thermo->setMassFractions_NoNorm(Y);
+    thermo->setState_TP(T, pressure);
+}
+
 void CanteraGas::setStateMole(const dvec& X, const double T)
 {
     thermo->setState_TPX(T, pressure, X.data());

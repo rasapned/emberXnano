@@ -5,6 +5,7 @@
 #include "chemistry0d.h"
 #include "scalarFunction.h"
 
+#include <algorithm>
 #include <boost/format.hpp>
 
 SourceSystem::SourceSystem()
@@ -49,17 +50,121 @@ void SourceSystem::setOptions(ConfigOptions& opts)
     options = &opts;
 }
 
-void SourceSystem::initialize(size_t new_nSpec)
+void SourceSystem::initialize(size_t new_nSpec, size_t new_nMoments)
 {
     nSpec = new_nSpec;
+    nMoments = new_nMoments;
 
     Y.setConstant(nSpec, NaN);
+    moments.setConstant(nMoments, NaN);
     cpSpec.resize(nSpec);
-    splitConst.resize(nSpec + 2);
+    splitConst.resize(nSpec + 2 + nMoments);
     hk.resize(nSpec);
 
     W.resize(gas->nSpec); // move this to initialize
     gas->getMolecularWeights(W);
+}
+
+void SourceSystem::computeNucleationRates
+(dvec& momentsQ, dvec& momentsD, dvec& speciesQ, dvec& speciesD)
+{
+    momentsQ.setZero(nMoments);
+    momentsD.setZero(nMoments);
+    speciesQ.setZero(nSpec);
+    speciesD.setZero(nSpec);
+
+    if (nMoments == 0) {
+        return;
+    }
+
+    // --- Collision-based nucleation channels ----------------------------
+    // The hard-sphere kinetic collision prefactor (diameter/reduced-mass
+    // terms) is precomputed once in Python; only sqrt(T) and the
+    // concentrations need to be evaluated here.
+    for (size_t c = 0; c < options->nucSpeciesA.size(); c++) {
+        size_t kA = options->nucSpeciesA[c];
+        size_t kB = options->nucSpeciesB[c];
+        double concA = Y[kA] * rho / W[kA]; // [kmol/m^3]
+        double concB = Y[kB] * rho / W[kB]; // [kmol/m^3]
+
+        double J = options->nucCollisionPrefactor[c] * sqrt(T) * concA * concB;
+        if (kA == kB) {
+            // Each A-A collision is counted once, not twice.
+            J *= 0.5;
+        }
+        J = std::max(J, 0.0);
+
+        // Particle moments: pure production.
+        momentsQ[kN] += J;
+        momentsQ[kV] += J * options->nucVolumePerEvent[c];
+
+        // Gas species consumption: pure destruction. (kA == kB naturally
+        // adds to the same slot twice, matching 2 monomers consumed per
+        // homomolecular event.) By construction, particleDensity times the
+        // moments production above equals this consumption exactly -- see
+        // readConfig.h -- preserving sum(Y) + particleDensity*V == 1.
+        speciesD[kA] += options->nucStoichA[c] * J * W[kA] / rho;
+        speciesD[kB] += options->nucStoichB[c] * J * W[kB] / rho;
+    }
+
+    // --- Classical nucleation theory (CNT) -------------------------------
+    // Monomer attachment only (no pairwise cluster collisions). precursorConc
+    // still sums all cluster sizes toward the monomer-equivalent
+    // supersaturation, but the rate and mass balance are referenced to the
+    // single true monomer species (nucMonomerIndex, atom count == 1).
+    size_t nPrecursors = options->nucPrecursorSpecies.size();
+    if (nPrecursors == 0 || options->nucMonomerIndex < 0) {
+        return;
+    }
+
+    const double kB_ = Cantera::Boltzmann;
+    const double NA_ = Cantera::Avogadro;
+    const double Ru_ = Cantera::GasConstant;
+
+    // Saturation vapor pressure (Antoine equation, T in degC, P in bar).
+    double Tc = T - 273.15;
+    double pSat = pow(10.0, options->nucAntoineA -
+                      options->nucAntoineB / (Tc + options->nucAntoineC)) * 1e5; // [Pa]
+
+    // Monomer-equivalent partial pressure: sum of precursor concentrations
+    // weighted by their cluster size (atom count).
+    double pMon = 0.0;
+    for (size_t i = 0; i < nPrecursors; i++) {
+        size_t k = options->nucPrecursorSpecies[i];
+        double conc = Y[k] * rho / W[k]; // [kmol/m^3]
+        pMon += conc * 1000.0 * options->nucPrecursorAtomCount[i] * Ru_ * T;
+    }
+    pMon = std::max(pMon, 0.0);
+    double S = pMon / (pSat + 1e-300); // supersaturation ratio
+    if (S <= 1.0) {
+        return; // no nucleation below saturation
+    }
+
+    // Monomer mass/volume, derived from the mechanism (not user-specified),
+    // consistent with the collision channels' particleDensity convention.
+    size_t kMon = options->nucPrecursorSpecies[options->nucMonomerIndex];
+    double n_mon = pMon / (kB_ * T); // monomer-equivalent number density [1/m^3]
+    double m1 = W[kMon] / NA_; // monomer mass [kg] -- unrelated to M_PI
+    double v1 = W[kMon] / (NA_ * options->particleDensity); // monomer volume [m^3]
+
+    // Surface tension and dimensionless surface energy parameter Theta,
+    // referenced to a spherical monomer of volume v1.
+    double sigma = options->nucSurfaceTensionA + options->nucSurfaceTensionB * T;
+    double d1 = pow(6.0 * v1 / M_PI, 1.0 / 3.0);
+    double theta = M_PI * d1 * d1 * sigma / (kB_ * T);
+
+    // Critical cluster size (classical nucleation theory)
+    double lnS = log(S);
+    double gStar = pow(2.0 * theta / (3.0 * lnS), 3.0);
+
+    // Nucleation rate
+    double J = n_mon * n_mon * S * v1 * pow(2.0 * sigma / M_PI / m1, 0.5) *
+              exp(theta - (4.0*theta*theta*theta/27.0/(lnS*lnS)));
+    J = std::max(J, 0.0);
+
+    momentsQ[kN] += J;
+    momentsQ[kV] += J * v1 * gStar;
+    speciesD[kMon] += J * gStar * W[kMon] / rho;
 }
 
 void SourceSystem::setTimers
@@ -101,13 +206,14 @@ void SourceSystem::writeState(std::ostream& out, bool init)
 
 // ----------------------------------------------------------------------------
 
-void SourceSystemCVODE::initialize(size_t new_nSpec)
+void SourceSystemCVODE::initialize(size_t new_nSpec, size_t new_nMoments)
 {
-    SourceSystem::initialize(new_nSpec);
+    SourceSystem::initialize(new_nSpec, new_nMoments);
     dYdt.resize(nSpec);
     wDot.resize(nSpec);
+    dMomentsdt.resize(nMoments);
 
-    integrator.reset(new SundialsCvode(static_cast<int>(nSpec+2)));
+    integrator.reset(new SundialsCvode(static_cast<int>(nSpec+2+nMoments)));
     integrator->setODE(this);
     integrator->linearMultistepMethod = CV_BDF;
     integrator->maxNumSteps = 1000000;
@@ -120,6 +226,9 @@ void SourceSystemCVODE::setOptions(ConfigOptions& opts)
     integrator->abstol[kEnergy] = options->integratorEnergyAbsTol;
     for (size_t k=0; k<nSpec; k++) {
         integrator->abstol[kSpecies+k] = options->integratorSpeciesAbsTol;
+    }
+    for (size_t m=0; m<nMoments; m++) {
+        integrator->abstol[kSpecies+nSpec+m] = options->integratorSpeciesAbsTol;
     }
     integrator->reltol = options->integratorRelTol;
     integrator->minStep = options->integratorMinTimestep;
@@ -158,7 +267,13 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
         dUdt = splitConst[kMomentum];
         dTdt = splitConst[kEnergy];
     }
-    dYdt = scale * wDot * W / rho + splitConst.tail(nSpec);
+    dYdt = scale * wDot * W / rho + splitConst.segment(kSpecies, nSpec);
+
+    // Particle nucleation source terms (two-way coupled with the gas phase)
+    dvec momentsQ, momentsD, speciesQ, speciesD;
+    computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
+    dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
+    dYdt += speciesQ - speciesD;
 
     roll_ydot(ydot);
     return 0;
@@ -272,7 +387,7 @@ int SourceSystemCVODE::fdJacobian(const realtype t, const sdVector& y,
     jacobianTimer->start();
     sdVector yplusdy(y.length(), sunContext);
     sdVector ydot2(y.length(), sunContext);
-    size_t nVars = nSpec+2;
+    size_t nVars = nSpec+2+nMoments;
     double eps = sqrt(DBL_EPSILON);
     double atol = DBL_EPSILON;
 
@@ -294,12 +409,13 @@ int SourceSystemCVODE::fdJacobian(const realtype t, const sdVector& y,
 }
 
 void SourceSystemCVODE::setState
-(double tInitial, double uu, double tt, const dvec& yy)
+(double tInitial, double uu, double tt, const dvec& yy, const dvec& mm)
 {
     integrator->t0 = tInitial;
     integrator->y[kMomentum] = uu;
     integrator->y[kEnergy] = tt;
     Eigen::Map<dvec>(&integrator->y[kSpecies], nSpec) = yy;
+    Eigen::Map<dvec>(&integrator->y[kSpecies+nSpec], nMoments) = mm;
     integrator->initialize();
     if (heatLoss && !options->alwaysUpdateHeatFlux) {
         qLoss = heatLoss->eval(x, tInitial, uu, tt, const_cast<dvec&>(yy));
@@ -336,6 +452,7 @@ void SourceSystemCVODE::unroll_y(const sdVector& y, double t)
         U = 0;
     }
     Y = Eigen::Map<dvec>(&y[kSpecies], nSpec);
+    moments = Eigen::Map<dvec>(&y[kSpecies+nSpec], nMoments);
 }
 
 void SourceSystemCVODE::roll_y(sdVector& y) const
@@ -343,6 +460,7 @@ void SourceSystemCVODE::roll_y(sdVector& y) const
     y[kEnergy] = T;
     y[kMomentum] = U;
     Eigen::Map<dvec>(&y[kSpecies], nSpec) = Y;
+    Eigen::Map<dvec>(&y[kSpecies+nSpec], nMoments) = moments;
 }
 
 void SourceSystemCVODE::roll_ydot(sdVector& ydot) const
@@ -350,6 +468,7 @@ void SourceSystemCVODE::roll_ydot(sdVector& ydot) const
     ydot[kEnergy] = dTdt;
     ydot[kMomentum] = dUdt;
     Eigen::Map<dvec>(&ydot[kSpecies], nSpec) = dYdt;
+    Eigen::Map<dvec>(&ydot[kSpecies+nSpec], nMoments) = dMomentsdt;
 }
 
 std::string SourceSystemCVODE::getStats()
@@ -365,6 +484,8 @@ void SourceSystemCVODE::writeState(std::ostream& out, bool init)
         out << "dYdt = []" << std::endl;
         out << "splitConstT = []" << std::endl;
         out << "splitConstY = []" << std::endl;
+        out << "moments = []" << std::endl;
+        out << "dMomentsdt = []" << std::endl;
     }
 
     Eigen::IOFormat fmt(15, Eigen::DontAlignCols, ",", ",", "", "", "[", "]");
@@ -372,7 +493,9 @@ void SourceSystemCVODE::writeState(std::ostream& out, bool init)
     out << "dTdt.append(" << dTdt << ")" << std::endl;
     out << "dYdt.append(" << dYdt.format(fmt) << ")" << std::endl;
     out << "splitConstT.append(" << splitConst[kEnergy] << ")" << std::endl;
-    out << "splitConstY.append(" << splitConst.tail(nSpec).format(fmt) << ")" << std::endl;
+    out << "splitConstY.append(" << splitConst.segment(kSpecies, nSpec).format(fmt) << ")" << std::endl;
+    out << "moments.append(" << moments.format(fmt) << ")" << std::endl;
+    out << "dMomentsdt.append(" << dMomentsdt.format(fmt) << ")" << std::endl;
 }
 
 void SourceSystemCVODE::writeJacobian(std::ostream& out)
@@ -405,15 +528,17 @@ SourceSystemQSS::SourceSystemQSS()
     dTdtD = 0;
 }
 
-void SourceSystemQSS::initialize(size_t new_nSpec)
+void SourceSystemQSS::initialize(size_t new_nSpec, size_t new_nMoments)
 {
-    SourceSystem::initialize(new_nSpec);
-    integrator.initialize(new_nSpec + 2);
+    SourceSystem::initialize(new_nSpec, new_nMoments);
+    integrator.initialize(new_nSpec + 2 + new_nMoments);
 
     dYdtQ.setConstant(nSpec, 0);
     dYdtD.setConstant(nSpec, 0);
     wDotD.resize(nSpec);
     wDotQ.resize(nSpec);
+    dMomentsdtQ.setConstant(nMoments, 0);
+    dMomentsdtD.setConstant(nMoments, 0);
 
     integrator.enforce_ymin[kMomentum] = false;
 }
@@ -428,15 +553,15 @@ void SourceSystemQSS::setOptions(ConfigOptions& opts)
     integrator.itermax = options->qss_iterationCount;
     integrator.abstol = options->qss_abstol;
     integrator.stabilityCheck = options->qss_stabilityCheck;
-    integrator.ymin.setConstant(nSpec + 2, options->qss_minval);
+    integrator.ymin.setConstant(nSpec + 2 + nMoments, options->qss_minval);
     integrator.ymin[kMomentum] = -1e4;
 }
 
 void SourceSystemQSS::setState
-(double tStart, double uu, double tt, const dvec& yy)
+(double tStart, double uu, double tt, const dvec& yy, const dvec& mm)
 {
-    dvec yIn(nSpec + 2);
-    yIn << uu, tt, yy;
+    dvec yIn(nSpec + 2 + nMoments);
+    yIn << uu, tt, yy, mm;
     integrator.setState(yIn, tStart);
     if (heatLoss && !options->alwaysUpdateHeatFlux) {
         qLoss = heatLoss->eval(x, tStart, uu, tt, const_cast<dvec&>(yy));
@@ -485,8 +610,16 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
         dTdtD = qLoss / (rho*cp);
     }
 
-    dYdtQ = scale * wDotQ * W / rho + splitConst.tail(nSpec);
+    dYdtQ = scale * wDotQ * W / rho + splitConst.segment(kSpecies, nSpec);
     dYdtD = scale * wDotD * W / rho;
+
+    // Particle nucleation source terms (two-way coupled with the gas phase)
+    dvec momentsQ, momentsD, speciesQ, speciesD;
+    computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
+    dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);
+    dMomentsdtD = momentsD;
+    dYdtQ += speciesQ;
+    dYdtD += speciesD;
 
     assert(rhou > 0);
     assert(rho > 0);
@@ -512,18 +645,19 @@ void SourceSystemQSS::unroll_y(const dvec& y, bool corrector)
         }
         U = 0;
     }
-    Y = y.tail(nSpec);
+    Y = y.segment(kSpecies, nSpec);
+    moments = y.segment(kSpecies+nSpec, nMoments);
 }
 
 void SourceSystemQSS::roll_y(dvec& y) const
 {
-    y << U, T, Y;
+    y << U, T, Y, moments;
 }
 
 void SourceSystemQSS::roll_ydot(dvec& q, dvec& d) const
 {
-    q << dUdtQ, dTdtQ, dYdtQ;
-    d << dUdtD, dTdtD, dYdtD;
+    q << dUdtQ, dTdtQ, dYdtQ, dMomentsdtQ;
+    d << dUdtD, dTdtD, dYdtD, dMomentsdtD;
 }
 
 std::string SourceSystemQSS::getStats()

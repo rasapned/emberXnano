@@ -13,7 +13,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/single_Igor'
+output = 'run/test'
 
 # Set strain rate (1/s) for the counterflow flame
 a = 150.0
@@ -146,10 +146,10 @@ if __name__ == '__main__':
     while progress_H2[j] <= progress_H2[j+1]:
         j += 1
     ax6.plot(struct.x[:i+1], progress_H2O[:i+1], 'y-', label='Ember c_H2O')
-    ax6.plot(struct.x[:j+1], progress_H2[:j+1], 'c-', label='Ember c_H2')
+    #ax6.plot(struct.x[:j+1], progress_H2[:j+1], 'c-', label='Ember c_H2')
     ax7.plot(struct.x, Z, 'r-', label='Mixture fraction')
     ax8.plot(progress_H2O[:i+1], struct.T[:i+1], 'y-', label='Ember c_H2O')
-    ax8.plot(progress_H2[:j+1], struct.T[:j+1], 'c-', label='Ember c_H2')
+    #ax8.plot(progress_H2[:j+1], struct.T[:j+1], 'c-', label='Ember c_H2')
     ax6.set_xlabel('Position [m]')
     ax6.set_ylabel('Progress variable', color='b')
     ax7.set_ylabel('Mixture fraction', color='r')
@@ -166,9 +166,9 @@ if __name__ == '__main__':
     while cant_c_H2[j] <= cant_c_H2[j+1]:
         j += 1
     ax6.plot(cant_x[:i+1], cant_c_H2O[:i+1], 'y--', label='Cantera c_H2O')
-    ax6.plot(cant_x[:j+1], cant_c_H2[:j+1], 'c--', label='Cantera c_H2')
+    #ax6.plot(cant_x[:j+1], cant_c_H2[:j+1], 'c--', label='Cantera c_H2')
     ax8.plot(cant_c_H2O[:i+1], cant_T[:i+1], 'y--', label='Cantera c_H2O')
-    ax8.plot(cant_c_H2[:j+1], cant_T[:j+1], 'c--', label='Cantera c_H2')
+    #ax8.plot(cant_c_H2[:j+1], cant_T[:j+1], 'c--', label='Cantera c_H2')
     ax6.legend(loc='best')
     ax7.legend(loc='best') 
     ax8.legend(loc='best')
@@ -176,27 +176,22 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(output + '/ProgressV.png')
     plt.close()
+    plt.close()
 
    
-     
-    # Species mass fractions: H2O and OH on left axis, FE on right axis
-    i_H2O = gas.species_index('H2O')
-    i_N2  = gas.species_index('N2')
-    i_FE  = gas.species_index('FE')
-    fig3, ax4 = plt.subplots()
-    ax5 = ax4.twinx()
-    ax4.plot(struct.x, struct.moments[0], 'g-',  label='H2O')
-    #ax4.plot(struct.x, struct.Y[i_N2,  :], 'y-', label='N2')
-    #ax5.plot(struct.x, struct.Y[i_FE,  :], 'k--',  label='FE')
-    ax4.set_xlabel('Position [m]')
-    ax4.set_ylabel('Moment', color='b')
-    #ax5.set_ylabel('Mass fraction FE', color='r')
-    ax4.tick_params(axis='y', labelcolor='b')
-    #ax5.tick_params(axis='y', labelcolor='r')
-    lines4, labels4 = ax4.get_legend_handles_labels()
-    lines5, labels5 = ax5.get_legend_handles_labels()
-    ax4.legend(lines4 + lines5, labels4 + labels5, loc='best')
-    plt.title(f'Moment test')
-    plt.tight_layout()
-    plt.savefig(output + '/moments_test.png')
-    plt.close()
+    # for t in range(17):
+    #     fig3, ax4 = plt.subplots()
+    #     ax4.set_xlabel('Position [m]')
+    #     ax4.set_ylabel('Moment', color='b')
+    #     ax4.tick_params(axis='y', labelcolor='b')
+       
+    #     currFile = output + '/prof{:06d}.h5'.format(t)
+    #     struct_t = utils.load(currFile) 
+    #     ax4.plot(struct_t.x, struct_t.moments[0], 'g-',  label=f'time = {t*0.001:.3f} s')
+
+    #     ax4.legend(loc='best')
+    #     plt.title(f'Test')
+    #     plt.tight_layout()
+    #     plt.savefig(output + f'/moment_test-{t:06d}.png')
+    #     plt.close()
+    
