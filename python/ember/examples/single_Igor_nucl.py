@@ -108,25 +108,39 @@ conf = Config(
 
 # Run the simulation and plot the results
 if __name__ == '__main__':
-    #conf.run()
+    conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 
     print(struct.keys())    
     
     # Plot the number particles and volume of the particles
+    # Calculate particle diameter
+    #d_p = (6 * struct.moments[1,:] / (np.pi * struct.moments[0,:]))**(1/3)
     fig, ax1 = plt.subplots()
-    ax2 = ax1.twinx()
+    #ax2 = ax1.twinx()
     ax1.plot(struct.x, struct.moments[0,:], 'b-', label='Number of particles')
-    ax2.plot(struct.x, struct.moments[1,:], 'r-', label='Temperature')
+    #ax2.plot(struct.x, d_p, 'r-', label='Particle diameter')
     ax1.set_xlabel('Position [m]')
     ax1.set_ylabel('Particle number density / m⁻³', color='b')
-    ax2.set_ylabel('Particle volume density / -', color='r')
+    #ax2.set_ylabel('Particle diameter / m', color='r')
     ax1.axhline(y=0, color='k', linestyle='--', linewidth=0.5)
-    plt.title(f'Ember planar, p=3000 Pa, a={a} s⁻¹')
+    #plt.title(f'Ember planar, p=3000 Pa, a={a} s⁻¹')
     plt.tight_layout()
     plt.savefig(output + '/Particles_nucl.png')
     plt.close()
+
+    # Plot the temperature of the flame
+    fig, ax1 = plt.subplots()
+    ax1.plot(struct.x, struct.T, 'r-', label='Temperature')
+    ax1.set_xlabel('Position [m]')
+    ax1.set_ylabel('Temperature / K', color='r')
+    ax1.axhline(y=0, color='k', linestyle='--', linewidth=0.5)
+    #plt.title(f'Ember planar, p=3000 Pa, a={a} s⁻¹')
+    plt.tight_layout()
+    plt.savefig(output + '/Temperature.png')
+    plt.close()
+
 
     # # Plot the mass flux profile
     # fig2, ax3 = plt.subplots()

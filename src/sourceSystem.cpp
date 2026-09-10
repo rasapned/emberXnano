@@ -87,22 +87,21 @@ void SourceSystem::computeNucleationRates
         double concA = Y[kA] * rho / W[kA]; // [kmol/m^3]
         double concB = Y[kB] * rho / W[kB]; // [kmol/m^3]
 
+        // Calculate the nucleation rate (prefactor has a unit of m^3/s/sqrt(K)/kmol (already * avogadro))
+        // Unit of J: kmol/m^3/s
         double J = options->nucCollisionPrefactor[c] * sqrt(T) * concA * concB;
+        // Halve the nucleation for like molecules
         if (kA == kB) {
             // Each A-A collision is counted once, not twice.
             J *= 0.5;
         }
         J = std::max(J, 0.0);
 
-        // Particle moments: pure production.
-        momentsQ[kN] += J;
-        momentsQ[kV] += J * options->nucVolumePerEvent[c];
+        // Particle moments: pure production
+        momentsQ[kN] += J / rho;
+        momentsQ[kV] += J / rho * options->nucVolumePerEvent[c];
 
-        // Gas species consumption: pure destruction. (kA == kB naturally
-        // adds to the same slot twice, matching 2 monomers consumed per
-        // homomolecular event.) By construction, particleDensity times the
-        // moments production above equals this consumption exactly -- see
-        // readConfig.h -- preserving sum(Y) + particleDensity*V == 1.
+        // Gas species consumption: pure destruction
         speciesD[kA] += options->nucStoichA[c] * J * W[kA] / rho;
         speciesD[kB] += options->nucStoichB[c] * J * W[kB] / rho;
     }
@@ -162,8 +161,8 @@ void SourceSystem::computeNucleationRates
               exp(theta - (4.0*theta*theta*theta/27.0/(lnS*lnS)));
     J = std::max(J, 0.0);
 
-    momentsQ[kN] += J;
-    momentsQ[kV] += J * v1 * gStar;
+    momentsQ[kN] += J / rho;
+    momentsQ[kV] += J * v1 * gStar / rho;
     speciesD[kMon] += J * gStar * W[kMon] / rho;
 }
 

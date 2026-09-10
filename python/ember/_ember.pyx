@@ -352,10 +352,9 @@ cdef class ConfigOptions:
 
                 dAB = 0.5 * (dA + dB)
                 muAB = mA * mB / (mA + mB)
-                # Hard-sphere kinetic collision prefactor, everything except
-                # sqrt(T) and the (state-dependent) concentrations -- see
-                # sourceSystem.cpp::computeNucleationRates().
-                prefactor = ((np.pi / 4.0) * dAB**2 *
+                # Convert kmol/m^3 concentrations to molecule/m^3 and the
+                # resulting event rate back to kmol/m^3/s.
+                prefactor = (np.pi * dAB**2 *
                              np.sqrt(8.0 * cantera.boltzmann / (np.pi * muAB)) *
                              cantera.avogadro)
 

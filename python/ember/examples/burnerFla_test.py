@@ -19,7 +19,7 @@ import cantera as ct
 
 output = 'run/test'
 
-# --- Same reactant composition as your stagnation-point case ---
+# Same reactant composition 
 X_FEC5O5 = 0.0005
 VS_total = 400 + 400 + 600
 VS_total /= (1 - X_FEC5O5)
@@ -32,7 +32,7 @@ print("Reactants:", react)
 mechanism = 'Iron_elte_Syngas-newTransp.yaml'
 pressure = 3000.0
 Tu = 300.0
-u_in = 1.1                 # m/s, prescribed inlet (burner) velocity
+u_in = 1.1                 
 xLeft = 0.0
 xRight = 0.065
 nPoints = 200
@@ -44,7 +44,7 @@ nPoints = 200
 x_flame_guess = xLeft + 0.15 * (xRight - xLeft)
 flameThickness_guess = 0.02 * (xRight - xLeft)
 
-# --- Reference states via Cantera, used only to build the initial guess ---
+# Reference states via Cantera, used only to build the initial guess ---
 gas = ct.Solution(mechanism)
 gas.TPX = Tu, pressure, react
 rho_u = gas.density
@@ -58,15 +58,14 @@ Tb = gas.T
 Yb = gas.Y.copy()
 print(f"Adiabatic flame temperature: {Tb:.1f} K")
 
-# u_in must be below the laminar flame speed or the flame blows off
-# downstream; well above it and it flashes back into the burner.
+# check u laminar (should be above inlet speed)
 gas.TPX = Tu, pressure, react
 flame = ct.FreeFlame(gas, width=0.02)
 #flame.solve(loglevel=0, auto=True)
 S_L = flame.velocity[0]
 print(f"Laminar flame speed S_L = {S_L:.4f} m/s (u_in = {u_in} m/s)")
 
-# --- Hand-built initial profile (tanh transition, unburned -> burned) ---
+# Initial profile ????
 x = np.linspace(xLeft, xRight, nPoints)
 s = 0.5 * (1 + np.tanh((x - x_flame_guess) / flameThickness_guess))
 
@@ -82,13 +81,11 @@ conf = Config(
     General(twinFlame=False,
             flameGeometry='planar',
             nThreads=1,
-     #       chemistryIntegrator='cvode',
-     #       splittingMethod='strang',
-            continuityBC='fixedLeft',   # fixes V at the inlet -- this is the default,
-                                         # but explicit here since your original used
-                                         # 'stagnationPoint' for the opposed-flow case
+            chemistryIntegrator='cvode',
+            splittingMethod='strang',
+            continuityBC='fixedLeft',    
             unburnedLeft=True,
-            fixedBurnedVal=False,       # right boundary is zero-gradient / free outflow
+            fixedBurnedVal=False,       
     ),
     InitialCondition(reactants=react,
                       pressure=pressure,
@@ -104,8 +101,8 @@ conf = Config(
     vtol=0.15,
     dvtol=0.25,
     gridMax=3e-4,
-    boundaryTol=2e-4,     # was 5e-5 default — this is the one driving unbounded growth
-    boundaryTolRm=5e-5,
+    boundaryTol=2e-3,     # was 5e-5 default — this is the one driving unbounded growth
+    boundaryTolRm=5e-4,
     addPointCount=2,
     ),
     CvodeTolerances(
@@ -116,14 +113,14 @@ conf = Config(
     ),
     TerminationCondition(
         tolerance=3e-3,     # relative RMS heat-release tolerance (was 5e-4, too tight)
-        steadyPeriod=0.02,  # average over a longer window (default 0.002 too short here)
-        tMin=0.1,           # must exceed steadyPeriod and allow the flame to relax
+        steadyPeriod=0.01,  # average over a longer window (default 0.002 too short here)
+        tMin=0.01,           # must exceed steadyPeriod and allow the flame to relax
         tEnd=0.6,           # several residence times (xRight/u_in ~ 0.06 s here)
     ),
 )
 
 if __name__ == '__main__':
-    #conf.run()
+    conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 
