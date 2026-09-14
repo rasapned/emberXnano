@@ -119,7 +119,7 @@ if __name__ == '__main__':
     #d_p = (6 * struct.moments[1,:] / (np.pi * struct.moments[0,:]))**(1/3)
     fig, ax1 = plt.subplots()
     #ax2 = ax1.twinx()
-    ax1.plot(struct.x, struct.moments[0,:], 'b-', label='Number of particles')
+    ax1.plot(struct.x, struct.numberDensity, 'b-', label='Number of particles')
     #ax2.plot(struct.x, d_p, 'r-', label='Particle diameter')
     ax1.set_xlabel('Position [m]')
     ax1.set_ylabel('Particle number density / m⁻³', color='b')

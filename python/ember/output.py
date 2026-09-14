@@ -107,9 +107,12 @@ class StateWriter(object):
             data['fileNumber'] = self.fileNumber
             self.write(data, ['x', 'T', 'U', 'Y', 'V', 'gridAlpha', 'a', 'dadt'])
 
-            # Particle moment scalars (passive-scalar transport), if enabled
+            # Particle moment scalars (passive-scalar transport), if enabled.
+            # numberDensity is derived from moments[0] (kmol particles / kg
+            # gas) and rho -- a pure unit conversion, not a solver state.
             if self.solver.nMoments > 0:
                 self.write(data, ['moments'])
+                data['numberDensity'] = self.solver.numberDensity
 
             # extended information
             if self.options.outputFiles.heatReleaseRate or errorFile:

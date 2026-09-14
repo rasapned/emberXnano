@@ -681,6 +681,21 @@ cdef class FlameSolver:
         def __get__(self):
             return getArray_MatrixMap(self.solver.moments)
 
+    property numberDensity:
+        """
+        Particle number density [particles/m^3], derived from the N moment
+        (``moments[0]``, transported internally as kmol of particles per kg
+        of gas -- consistent with the kmol convention used for gas species)
+        and the local gas density. This is purely a unit conversion of
+        already-computed state; the underlying transport/source terms are
+        unchanged.
+        """
+        def __get__(self):
+            if self.nMoments == 0:
+                raise AttributeError(
+                    "numberDensity is unavailable: particles.nMoments == 0")
+            return self.moments[0, :] * self.rho * cantera.avogadro
+
     property nSpec:
         def __get__(self):
             return self.solver.nSpec
