@@ -4,6 +4,7 @@
 #include "sundialsUtils.h"
 #include "chemistry0d.h"
 #include "scalarFunction.h"
+#include "particleUtils.h"
 
 #include <algorithm>
 #include <boost/format.hpp>
@@ -166,6 +167,47 @@ void SourceSystem::computeNucleationRates
     speciesD[kMon] += J * gStar * W[kMon] / rho;
 }
 
+void SourceSystem::computeCoagulationRates(dvec& momentsD)
+{
+    if (nMoments < 2 || !options->coagulation) {
+        // Both N (kN) and V (kV) are required to define a particle size.
+        return;
+    }
+
+    double N = moments[kN]; // [kmol particles / kg gas]
+    double V = moments[kV]; // [m^3 particle volume / kg gas]
+
+    double vParticle = particleVolumeFromMoments(N, V);
+    if (!(vParticle > 0)) {
+        return; // no particles present -- nothing to coagulate
+    }
+    double dc = particleDiameterFromVolume(vParticle); // [m]
+    double mp = vParticle * options->particleDensity; // single-particle mass [kg]
+
+    double Wmx_ = gas->getMixtureMolecularWeight(); // [kg/kmol]
+    double mu_ = gas->getViscosity(); // [Pa*s]
+    double meanFreePath = gasMeanFreePath(mu_, T, Wmx_, gas->pressure);
+
+    double beta = monodisperseCoagulationKernel(dc, mp, T, mu_, meanFreePath);
+
+    // Monodisperse Brownian coagulation halves the physical number density
+    // at rate dn/dt = -0.5*beta*n^2 (n = N*rho*Avogadro [particles/m^3]),
+    // while leaving the total particle volume (and hence V) unchanged --
+    // particles merge, matter is conserved. Converting back to the
+    // "kmol particles per kg gas" state-variable convention used for kN
+    // (rho and one power of Avogadro cancel; see the unit note above):
+    double dNdt_coag = 0.5 * N * N * rho * Cantera::Avogadro * beta;
+    momentsD[kN] += dNdt_coag;
+
+    if (debug) {
+        logFile.write(format(
+            "coagulation: j=%i x=%.4g | N=%.4e[kmol/kg] dc=%.4e[m] "
+            "mp=%.4e[kg] meanFreePath=%.4e[m] beta=%.4e[m^3/s] | "
+            "dN/dt=-%.4e[kmol/kg/s]") %
+            j % x % N % dc % mp % meanFreePath % beta % dNdt_coag);
+    }
+}
+
 void SourceSystem::setTimers
 (PerfTimer* reactionRates, PerfTimer* thermo, PerfTimer* jacobian)
 {
@@ -271,6 +313,7 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
+    computeCoagulationRates(momentsD);
     dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
     dYdt += speciesQ - speciesD;
 
@@ -615,6 +658,7 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
+    computeCoagulationRates(momentsD);
     dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);
     dMomentsdtD = momentsD;
     dYdtQ += speciesQ;

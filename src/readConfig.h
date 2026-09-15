@@ -231,6 +231,10 @@ public:
     // [particles.particleDensity]
     double particleDensity; //!< Bulk density of the particle material [kg/m^3]
 
+    //! [particles.coagulation] Enable the Brownian coagulation sink for the
+    //! N moment (particle-particle collisions: N decreases, V unchanged).
+    bool coagulation;
+
     //! Collision-based nucleation channels (parallel arrays, one entry per
     //! channel). Channel c consumes gas species nucSpeciesA[c] (stoichiometry
     //! nucStoichA[c]) and nucSpeciesB[c] (stoichiometry nucStoichB[c]; may

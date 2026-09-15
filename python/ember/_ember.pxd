@@ -120,6 +120,7 @@ cdef extern from "readConfig.h":
         double momentDiffusivity, momentBCLeft, momentBCRight
 
         double particleDensity
+        cbool coagulation
         vector[int] nucSpeciesA, nucSpeciesB
         vector[int] nucStoichA, nucStoichB
         vector[double] nucVolumePerEvent

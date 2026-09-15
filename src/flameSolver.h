@@ -12,6 +12,7 @@
 #include "convectionSystem.h"
 #include "quasi2d.h"
 #include "callback.h"
+#include "particleUtils.h"
 
 #include <iostream>
 #include <boost/ptr_container/ptr_vector.hpp>
@@ -96,10 +97,6 @@ public:
     void updateChemicalProperties(size_t j1, size_t j2); //!< Update thermodynamic, transport, and kinetic properties
     void updateParticleDiameter(); //!< Update particleDiameter from the local N, V moments
     void updateParticleDiffusivity(); //!< Update particleDiffusivity from particleDiameter (Stokes-Einstein-Cunningham)
-
-    //! Mean single-particle diameter [m] implied by the local N, V moments.
-    //! Returns 0 where no particles are present (N or V <= 0).
-    static double computeParticleDiameter(double N, double V);
     void updateBC(); //!< Set boundary condition for left edge of domain
     void calculateQdot(); //!< Compute heat release rate using the current temperature and mass fractions
 

@@ -543,6 +543,12 @@ class Particles(Options):
     #: means no nucleation -- moments remain purely advected/diffused.
     nucleation = Option(None)
 
+    #: Enable the Brownian coagulation sink term for the N moment (particles
+    #: colliding and merging: N decreases, V is unchanged). See
+    #: ``src/sourceSystem.cpp::computeCoagulationRates()``. Has no effect
+    #: unless ``nMoments`` >= 2 (both N and V moments are required).
+    coagulation = BoolOption(False, level=1)
+
     #: Bulk density of the particle material [kg/m^3], used to convert
     #: between consumed gas mass and particle volume. Used directly unless
     #: *particlePhaseName* is set and successfully found in the mechanism.

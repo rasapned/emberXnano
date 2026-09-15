@@ -64,6 +64,14 @@ public:
     void computeNucleationRates(dvec& momentsQ, dvec& momentsD,
                                 dvec& speciesQ, dvec& speciesD);
 
+    //! Add the Brownian coagulation sink to `momentsD[kN]` at the current
+    //! state (T, moments, rho). Coagulation reduces particle number (N) but
+    //! conserves particle-phase volume (V), so only kN is affected. Shared
+    //! by both SourceSystemCVODE::f() and SourceSystemQSS::odefun(), called
+    //! after computeNucleationRates() so it adds to (rather than replaces)
+    //! its destruction term.
+    void computeCoagulationRates(dvec& momentsD);
+
     //! Set the CanteraGas object to use for thermodynamic and kinetic property
     //! calculations.
     void setGas(CanteraGas* _gas) { gas = _gas; }

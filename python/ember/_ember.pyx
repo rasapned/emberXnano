@@ -332,6 +332,7 @@ cdef class ConfigOptions:
                       (self.particles.particlePhaseName, self.chemistry.mechanismFile,
                        e, particleDensity))
         opts.particleDensity = particleDensity
+        opts.coagulation = self.particles.coagulation
 
         nucleation = self.particles.nucleation
         if nucleation is not None:

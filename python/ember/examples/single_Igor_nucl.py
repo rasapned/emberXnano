@@ -103,12 +103,13 @@ conf = Config(
             collisionSpeciesA=collisionSpeciesA,
             collisionSpeciesB=collisionSpeciesB,
         ),
+        coagulation=True,
     )
 )
 
 # Run the simulation and plot the results
 if __name__ == '__main__':
-    #conf.run()
+    conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 

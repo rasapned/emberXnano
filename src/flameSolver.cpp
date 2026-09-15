@@ -730,22 +730,6 @@ void FlameSolver::updateChemicalProperties(size_t j1, size_t j2)
     }
 }
 
-double FlameSolver::computeParticleDiameter(double N, double V)
-{
-    if (!(N > 0) || !(V > 0)) {
-        // No particles present (yet) -- caller decides how to handle this.
-        return 0.0;
-    }
-
-    // Mean single-particle volume/diameter. N [kmol particles / kg gas] and
-    // V [m^3 particle volume / kg gas] carry the same "per kg of gas"
-    // normalization, so rho cancels out of the ratio; Avogadro's number here
-    // is Cantera's kmol-based constant, consistent with
-    // computeNucleationRates() in sourceSystem.cpp.
-    double vParticle = V / (N * Cantera::Avogadro); // [m^3]
-    return std::cbrt(6.0 * vParticle / M_PI); // [m]
-}
-
 void FlameSolver::updateParticleDiameter()
 {
     if (nMoments == 0) {
@@ -765,10 +749,7 @@ void FlameSolver::updateParticleDiffusivity()
 
     updateParticleDiameter();
 
-    // Physical constants in Cantera's kmol-based unit convention (consistent
-    // with computeNucleationRates() in sourceSystem.cpp).
     const double kB_ = Cantera::Boltzmann;
-    const double Ru_ = Cantera::GasConstant;
 
     for (size_t j = 0; j < nPoints; j++) {
         double dp = particleDiameter[j]; // [m]
@@ -780,14 +761,9 @@ void FlameSolver::updateParticleDiffusivity()
             continue;
         }
 
-        // Gas mean free path from kinetic theory (Chapman-Enskog), evaluated
-        // from the local viscosity, temperature and mixture molecular weight.
-        double meanFreePath = mu[j] / options.pressure *
-            std::sqrt(M_PI * Ru_ * T[j] / (2.0 * Wmx[j])); // [m]
-
-        // Cunningham slip correction (Allen & Raabe, 1985 coefficients).
+        double meanFreePath = gasMeanFreePath(mu[j], T[j], Wmx[j], options.pressure);
         double Kn = 2.0 * meanFreePath / dp;
-        double Cc = 1.0 + Kn * (1.257 + 0.4 * std::exp(-1.1 / Kn));
+        double Cc = cunninghamSlipCorrection(Kn);
 
         // Stokes-Einstein-Cunningham particle diffusivity.
         particleDiffusivity[j] = kB_ * T[j] * Cc / (3.0 * M_PI * mu[j] * dp);
