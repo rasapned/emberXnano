@@ -94,6 +94,7 @@ public:
     void updateCrossTerms(); //!< calculates values of cross-component terms: jSoret, sumcpj, and jCorr
     void updateChemicalProperties(); //!< Update thermodynamic, transport, and kinetic properties
     void updateChemicalProperties(size_t j1, size_t j2); //!< Update thermodynamic, transport, and kinetic properties
+    void updateParticleDiffusivity(); //!< Update particleDiffusivity from the local mean particle size (Stokes-Einstein-Cunningham)
     void updateBC(); //!< Set boundary condition for left edge of domain
     void calculateQdot(); //!< Compute heat release rate using the current temperature and mass fractions
 
@@ -137,6 +138,7 @@ public:
     dvec cp; //!< mixture heat capacity [J/kg*K]
     dmatrix cpSpec; //!< species molar heat capacities [J/kmol*K]
     dmatrix rhoD; //!< density * diffusivity [kg/m*s]
+    dvec particleDiffusivity; //!< particle Brownian diffusivity from Stokes-Einstein-Cunningham [m^2/s]
     dmatrix Dkt; //!< thermal diffusivity
     dmatrix hk; //!< species molar enthalpies [J/kmol]
     dmatrix jFick; //!< Fickian mass flux [kg/m^2*s]

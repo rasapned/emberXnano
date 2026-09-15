@@ -521,7 +521,13 @@ class Particles(Options):
     #: to disable the particle module entirely.
     nMoments = IntegerOption(0, min=0)
 
-    #: Diffusivity used for all particle moment scalars [m^2/s].
+    #: Fallback diffusivity [m^2/s] for the particle moment scalars, used
+    #: only where no particles are present yet (N or V == 0). Everywhere
+    #: particles exist, the actual diffusivity is instead computed at each
+    #: grid point from the local mean particle size (via the N and V
+    #: moments) and gas state, using the Stokes-Einstein relation with the
+    #: Cunningham slip correction -- see
+    #: ``src/flameSolver.cpp::updateParticleDiffusivity()``.
     momentDiffusivity = FloatOption(1e-5, min=0, level=1)
 
     #: Fixed value imposed at the left boundary of the domain when the

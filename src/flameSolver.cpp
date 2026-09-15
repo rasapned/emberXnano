@@ -168,6 +168,7 @@ void FlameSolver::setupStep()
 void FlameSolver::prepareIntegrators()
 {
     splitTimer.resume();
+    updateParticleDiffusivity();
     // Diffusion terms
     if (!options.quasi2d) {
         // Diffusion solvers: Energy and momentum
@@ -187,7 +188,7 @@ void FlameSolver::prepareIntegrators()
         for (size_t m=0; m<nMoments; m++) {
             DiffusionSystem& sys = diffusionTerms[kMoments+m];
             sys.B = rho.inverse();
-            sys.D.setConstant(nPoints, options.momentDiffusivity);
+            sys.D = particleDiffusivity;
         }
     } else {
         // Diffusion solvers: Energy and momentum
@@ -209,7 +210,7 @@ void FlameSolver::prepareIntegrators()
         // Diffusion solvers: Particle moments (passive scalars)
         for (size_t m=0; m<nMoments; m++) {
             DiffusionSystem& sys = diffusionTerms[kMoments+m];
-            sys.D.setConstant(nPoints, options.momentDiffusivity);
+            sys.D = particleDiffusivity;
             for (size_t j = 0; j <= jj; j++) {
                 sys.B[j] = 1 / (rho[j] * vzInterp->get(x[j], tNow));
             }
@@ -504,6 +505,7 @@ void FlameSolver::resizeAuxiliary()
     cpSpec.resize(nSpec, nPoints);
     rhoD.resize(nSpec, nPoints);
     Dkt.resize(nSpec, nPoints);
+    particleDiffusivity.setConstant(nPoints, options.momentDiffusivity);
     wDot.resize(nSpec, nPoints);
     hk.resize(nSpec, nPoints);
     jFick.setZero(nSpec, nPoints);
@@ -727,6 +729,47 @@ void FlameSolver::updateChemicalProperties(size_t j1, size_t j2)
     }
 }
 
+void FlameSolver::updateParticleDiffusivity()
+{
+    if (nMoments == 0) {
+        return;
+    }
+
+    // Physical constants in Cantera's kmol-based unit convention (consistent
+    // with computeNucleationRates() in sourceSystem.cpp).
+    const double kB_ = Cantera::Boltzmann;
+    const double NA_ = Cantera::Avogadro;
+    const double Ru_ = Cantera::GasConstant;
+
+    for (size_t j = 0; j < nPoints; j++) {
+        double N = moments(kN, j); // [kmol particles / kg gas]
+        double V = moments(kV, j); // [m^3 particle volume / kg gas]
+
+        if (!(N > 0) || !(V > 0)) {
+            // No particles present (yet) at this point -- fall back to the
+            // user-specified constant so the equation stays well posed.
+            particleDiffusivity[j] = options.momentDiffusivity;
+            continue;
+        }
+
+        // Mean single-particle volume/diameter. N and V carry the same
+        // "per kg of gas" normalization, so rho cancels out of the ratio.
+        double vParticle = V / (N * NA_); // [m^3]
+        double dp = std::cbrt(6.0 * vParticle / M_PI); // [m]
+
+        // Gas mean free path from kinetic theory (Chapman-Enskog), evaluated
+        // from the local viscosity, temperature and mixture molecular weight.
+        double meanFreePath = mu[j] / options.pressure *
+            std::sqrt(M_PI * Ru_ * T[j] / (2.0 * Wmx[j])); // [m]
+
+        // Cunningham slip correction (Allen & Raabe, 1985 coefficients).
+        double Kn = 2.0 * meanFreePath / dp;
+        double Cc = 1.0 + Kn * (1.257 + 0.4 * std::exp(-1.1 / Kn));
+
+        // Stokes-Einstein-Cunningham particle diffusivity.
+        particleDiffusivity[j] = kB_ * T[j] * Cc / (3.0 * M_PI * mu[j] * dp);
+    }
+}
 
 void FlameSolver::setDiffusionSolverState(double tInitial)
 {

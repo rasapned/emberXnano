@@ -11,6 +11,7 @@ run
 *.pdb
 .sconsign.dblite
 build
+.ccls-cache
 .settings
 .sconf_temp
 ember.conf

@@ -116,7 +116,7 @@ if __name__ == '__main__':
     
     # Plot the number particles and volume of the particles
     # Calculate particle diameter
-    #d_p = (6 * struct.moments[1,:] / (np.pi * struct.moments[0,:]))**(1/3)
+    # d_p = (6 * struct.moments[1,:] / (np.pi * struct.moments[0,:]))**(1/3)
     fig, ax1 = plt.subplots()
     #ax2 = ax1.twinx()
     ax1.plot(struct.x, struct.numberDensity, 'b-', label='Number of particles')
