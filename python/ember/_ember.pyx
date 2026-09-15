@@ -728,6 +728,16 @@ cdef class FlameSolver:
         def __get__(self):
             return getArray_Vec(self.solver.rho)
 
+    property particleDiameter:
+        """Mean single-particle diameter [m] implied by the N, V moments."""
+        def __get__(self):
+            return getArray_Vec(self.solver.particleDiameter)
+
+    property particleDiffusivity:
+        """Particle Brownian diffusivity [m^2/s] (Stokes-Einstein-Cunningham)."""
+        def __get__(self):
+            return getArray_Vec(self.solver.particleDiffusivity)
+
     property splitConstConv:
         def __get__(self):
             return getArray_Matrix(self.solver.splitConstConv)

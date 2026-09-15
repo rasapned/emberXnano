@@ -110,9 +110,15 @@ class StateWriter(object):
             # Particle moment scalars (passive-scalar transport), if enabled.
             # numberDensity is derived from moments[0] (kmol particles / kg
             # gas) and rho -- a pure unit conversion, not a solver state.
+            # particleDiameter/particleDiffusivity are the size and
+            # Stokes-Einstein-Cunningham diffusivity computed from the N, V
+            # moments each step (see updateParticleDiffusivity() in
+            # flameSolver.cpp) -- useful diagnostics, e.g. for spotting
+            # noisy diameter estimates where N, V are both near zero.
             if self.solver.nMoments > 0:
                 self.write(data, ['moments'])
                 data['numberDensity'] = self.solver.numberDensity
+                self.write(data, ['particleDiameter', 'particleDiffusivity'])
 
             # extended information
             if self.options.outputFiles.heatReleaseRate or errorFile:

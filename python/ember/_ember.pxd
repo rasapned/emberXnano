@@ -252,6 +252,8 @@ cdef extern from "flameSolver.h":
         CxxEigenMatrix cpSpec
         CxxEigenMatrix rhoD
         CxxEigenMatrix Dkt
+        CxxEigenVec particleDiameter
+        CxxEigenVec particleDiffusivity
         CxxEigenMatrix hk
         CxxEigenMatrix jFick
         CxxEigenMatrix jSoret

@@ -505,6 +505,7 @@ void FlameSolver::resizeAuxiliary()
     cpSpec.resize(nSpec, nPoints);
     rhoD.resize(nSpec, nPoints);
     Dkt.resize(nSpec, nPoints);
+    particleDiameter.setZero(nPoints);
     particleDiffusivity.setConstant(nPoints, options.momentDiffusivity);
     wDot.resize(nSpec, nPoints);
     hk.resize(nSpec, nPoints);
@@ -729,33 +730,55 @@ void FlameSolver::updateChemicalProperties(size_t j1, size_t j2)
     }
 }
 
+double FlameSolver::computeParticleDiameter(double N, double V)
+{
+    if (!(N > 0) || !(V > 0)) {
+        // No particles present (yet) -- caller decides how to handle this.
+        return 0.0;
+    }
+
+    // Mean single-particle volume/diameter. N [kmol particles / kg gas] and
+    // V [m^3 particle volume / kg gas] carry the same "per kg of gas"
+    // normalization, so rho cancels out of the ratio; Avogadro's number here
+    // is Cantera's kmol-based constant, consistent with
+    // computeNucleationRates() in sourceSystem.cpp.
+    double vParticle = V / (N * Cantera::Avogadro); // [m^3]
+    return std::cbrt(6.0 * vParticle / M_PI); // [m]
+}
+
+void FlameSolver::updateParticleDiameter()
+{
+    if (nMoments == 0) {
+        return;
+    }
+
+    for (size_t j = 0; j < nPoints; j++) {
+        particleDiameter[j] = computeParticleDiameter(moments(kN, j), moments(kV, j));
+    }
+}
+
 void FlameSolver::updateParticleDiffusivity()
 {
     if (nMoments == 0) {
         return;
     }
 
+    updateParticleDiameter();
+
     // Physical constants in Cantera's kmol-based unit convention (consistent
     // with computeNucleationRates() in sourceSystem.cpp).
     const double kB_ = Cantera::Boltzmann;
-    const double NA_ = Cantera::Avogadro;
     const double Ru_ = Cantera::GasConstant;
 
     for (size_t j = 0; j < nPoints; j++) {
-        double N = moments(kN, j); // [kmol particles / kg gas]
-        double V = moments(kV, j); // [m^3 particle volume / kg gas]
+        double dp = particleDiameter[j]; // [m]
 
-        if (!(N > 0) || !(V > 0)) {
+        if (!(dp > 0)) {
             // No particles present (yet) at this point -- fall back to the
             // user-specified constant so the equation stays well posed.
             particleDiffusivity[j] = options.momentDiffusivity;
             continue;
         }
-
-        // Mean single-particle volume/diameter. N and V carry the same
-        // "per kg of gas" normalization, so rho cancels out of the ratio.
-        double vParticle = V / (N * NA_); // [m^3]
-        double dp = std::cbrt(6.0 * vParticle / M_PI); // [m]
 
         // Gas mean free path from kinetic theory (Chapman-Enskog), evaluated
         // from the local viscosity, temperature and mixture molecular weight.
