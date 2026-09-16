@@ -104,7 +104,11 @@ conf = Config(
             collisionSpeciesB=collisionSpeciesB,
         ),
         coagulation=True,
-    )
+    ),
+     Debug(
+         sourcePoint=400,   # grid index j to inspect
+         sourceTime=0.004 # sim time to trigger at
+     ),
 )
 
 # Run the simulation and plot the results
