@@ -364,7 +364,19 @@ void OneDimGrid::addPoint(int jInsert, vector<dvector>& y)
 
     double xInsert = 0.5*(x[jInsert+1]+x[jInsert]);
 
+    // The cubic spline fit through the whole current grid has no bound on
+    // overshoot: for a sharp, still-under-resolved feature (few points
+    // spanning a narrow peak), the fitted curve can swing far outside the
+    // range of the two points bracketing the new one, producing a value
+    // that isn't just inaccurate but physically impossible (e.g. a mass
+    // fraction wildly exceeding the total available mass of that element).
+    // Since the new point sits between jInsert and jInsert+1, clamp the
+    // spline estimate to that bracket -- the same non-overshoot guarantee
+    // linear interpolation would give, while still using the (generally
+    // more accurate) spline value wherever it doesn't overshoot.
     double val = mathUtils::splines(x, dampVal, xInsert);
+    val = std::min(std::max(val, std::min(dampVal[jInsert], dampVal[jInsert+1])),
+                    std::max(dampVal[jInsert], dampVal[jInsert+1]));
     dvec tmp(N + 1);
     tmp << dampVal.head(jInsert + 1), val, dampVal.tail(N - jInsert - 1);
     dampVal = tmp;
@@ -372,6 +384,8 @@ void OneDimGrid::addPoint(int jInsert, vector<dvector>& y)
     for (dvector& row : y) {
         double yNew = mathUtils::splines(x, Eigen::Map<dvec>(&row[0], row.size()),
                                          xInsert);
+        yNew = std::min(std::max(yNew, std::min(row[jInsert], row[jInsert+1])),
+                         std::max(row[jInsert], row[jInsert+1]));
         row.insert(row.begin()+jInsert+1, yNew);
     }
 
