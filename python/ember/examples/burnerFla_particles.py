@@ -30,7 +30,8 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_bench'
+output = 'run/burnerFla_particles'
+
 
 # Same reactant composition as single_Igor_nucl.py
 X_FEC5O5 = 0.0005
@@ -48,7 +49,7 @@ pressure = 3000.0
 Tu = 300.0
 u_in = 1.1
 xLeft = 0.0
-xRight = 0.08
+xRight = 0.1
 nPoints = 200
 
 # --- Reference solution: Cantera BurnerFlame, same mechanism/composition ---
@@ -58,7 +59,7 @@ rho_u = gas.density
 mdot = rho_u * u_in
 print(f"rho_u = {rho_u:.6f} kg/m3 -> fixed V (mass flux) = {mdot:.6e} kg/m2/s")
 
-flame = ct.BurnerFlame(gas, width=xRight+0.02)
+flame = ct.BurnerFlame(gas, width=xRight)
 flame.burner.mdot = mdot
 flame.transport_model = 'mixture-averaged'
 flame.radiation_enabled = False
@@ -92,6 +93,20 @@ T0 = Tu + (Tb - Tu) * s
 Y0 = np.outer(1 - s, Yu) + np.outer(s, Yb)   # shape (nPoints, nSpecies)
 V0 = np.full(nPoints, mdot)                  # constant mass flux (a=0 planar continuity)
 U0 = np.zeros(nPoints)                       # no strain -> no radial velocity gradient
+
+# Collisional nucleation: the mechanism only tracks gas-phase Fe clusters up
+# to FE7 (FE, FE2, ..., FE7); any collision whose combined size reaches FE8
+# or larger is treated as leaving the gas phase to form a particle nucleus.
+maxClusterSize = 7
+clusterSpecies = ['FE'] + [f'FE{n}' for n in range(2, maxClusterSize + 1)]
+collisionSpeciesA, collisionSpeciesB = [], []
+for i in range(1, maxClusterSize + 1):
+    for j in range(i, maxClusterSize + 1):
+        if i + j >= 8:
+            collisionSpeciesA.append(clusterSpecies[i-1])
+            collisionSpeciesB.append(clusterSpecies[j-1])
+print("Nucleation channels:",
+      list(zip(collisionSpeciesA, collisionSpeciesB)))
 
 conf = Config(
     Paths(outputDir=output),
@@ -144,30 +159,34 @@ conf = Config(
     ),
     TerminationCondition(
         # Previous settings (kept for reference): the 'Q' (bulk heat-release)
-        # measurement declared this "steady" at t=0.012s while xFlame was
+        # measurement declared burnerFla_test.py "steady" while xFlame was
         # still visibly drifting at ~0.84 m/s -- 'Q' isn't sensitive to a
-        # moving-but-otherwise-unchanging front.
+        # moving-but-otherwise-unchanging front. Matters even more here:
+        # nucleation/coagulation rates depend on local residence time at
+        # each temperature, so basing particle moments on a flame that
+        # hasn't actually reached steady state would corrupt exactly the
+        # numbers being compared against OpenFOAM.
         #tolerance=5e-3,     # relative RMS heat-release tolerance
         #steadyPeriod=0.01,  # average over a longer window
         #tMin=0.01,          # must exceed steadyPeriod and allow the flame to relax
         #tEnd=0.015,         # several residence times (xRight/u_in ~ 0.06 s here)
         # 'dTdt' checks whether the temperature FIELD itself is still
-        # changing anywhere in space, which is what we actually care about.
+        # changing anywhere in space -- validated in burnerFla_test.py.
         measurement='dTdt',
         dTdtTol=0.6,        # tightened from default 10.0 [1/s]
         tMin=0.02,          # let the initial-guess transient clear first
-        tEnd=0.2,           # generous headroom; previous run needed >0.012s
-                            # and was still drifting steadily
+        tEnd=0.2,           # generous headroom
     ),
-    # Dump a state file after every split sub-stage (conv1/diff1/diff2/prod/
-    # diff3/conv2/diff4, see splitSolver.cpp) within this time window, so we
-    # can see exactly which operator first introduces the bad values, rather
-    # than only catching the coarser periodic profNow/prof000NNN snapshots
-    # (which land between crashes and miss the actual divergence). Narrow
-    # window bracketing the ~0.0044s crash time seen in the last run --
-    # adjust once you know a new crash time.
-    OutputFiles(debugIntegratorStages=False),
-    Debug(startTime=0.0043, stopTime=0.0046),
+    Particles(
+        nMoments=2,
+        momentBCLeft=0.0,
+        particleDensity=7874.0,
+        nucleation=NucleationChannel(
+            collisionSpeciesA=collisionSpeciesA,
+            collisionSpeciesB=collisionSpeciesB,
+        ),
+        coagulation=True,
+    ),
 )
 
 if __name__ == '__main__':
@@ -183,6 +202,20 @@ if __name__ == '__main__':
     plt.legend()
     plt.tight_layout()
     plt.savefig(output + '/FinalTemperature.png')
+    plt.close()
+
+    # Plot the number particles and volume of the particles
+    fig, ax1 = plt.subplots()
+    ax2 = ax1.twinx()
+    ax1.plot(struct.x, struct.numberDensity, 'b-', label='Number of particles')
+    ax2.plot(struct.x, struct.particleDiameter, 'r-', label='Particle diameter')
+    ax1.set_xlabel('Position [m]')
+    ax1.set_ylabel('Particle number density / m⁻³', color='b')
+    ax2.set_ylabel('Particle diameter / m', color='r')
+    ax1.axhline(y=0, color='k', linestyle='--', linewidth=0.5)
+    #plt.title(f'Ember planar, p=3000 Pa, a={a} s⁻¹')
+    plt.tight_layout()
+    plt.savefig(output + '/Particles_nucl.png')
     plt.close()
 
     # --- Species comparison: ember vs the Cantera BurnerFlame reference ---
