@@ -186,7 +186,8 @@ void OneDimGrid::adapt(vector<dvector>& y)
 
         // Special minimum grid size for flames pinned at x=0
         if (j == 0 && (leftBC == BoundaryCondition::ControlVolume ||
-                       leftBC == BoundaryCondition::WallFlux))
+                       leftBC == BoundaryCondition::WallFlux ||
+                       leftBC == BoundaryCondition::InletFlux))
         {
             double xLeftMin = min(centerGridMin, 0.02*x[jj]);
             if (hh[j] < 2*xLeftMin) {
@@ -325,7 +326,8 @@ void OneDimGrid::adapt(vector<dvector>& y)
 
         // Special fixed grid for flames pinned at x=0
         if (j == 1 && (leftBC == BoundaryCondition::ControlVolume ||
-                       leftBC == BoundaryCondition::WallFlux))
+                       leftBC == BoundaryCondition::WallFlux ||
+                       leftBC == BoundaryCondition::InletFlux))
         {
             if (debugParameters::debugAdapt) {
                 logFile.write("Adapt: no removal - fixed grid near r = 0.");
@@ -555,6 +557,7 @@ bool OneDimGrid::addLeft(vector<dvector>& y)
     if (fixedLeftLoc &&
         leftBC != BoundaryCondition::ControlVolume &&
         leftBC != BoundaryCondition::WallFlux &&
+        leftBC != BoundaryCondition::InletFlux &&
         x[0] > 0.0)
     {
         if (!pointAdded && debugParameters::debugRegrid) {

@@ -1,0 +1,985 @@
+description: |-
+  nits(length = "cm", time = "s", quantity = "mol", act_energy = "cal/mol")
+
+generator: cti2yaml
+cantera-version: 3.0.1
+date: Mon, 30 Dec 2024 10:41:46 +0100
+input-files: [opt-compact-mech-OF2.cti]
+
+units: {length: cm, quantity: mol, activation-energy: cal/mol}
+
+phases:
+- name: manip
+  thermo: ideal-gas
+  elements: [O, H, C, Fe, N, Ar, He]
+  species: [FE, FEO, FEOH, FEO2H2, FEO2, FEC5O5, FE2, FE3, FE4, FE5, FE6,
+    FE7, FE8, FE2OOOH, FE2OO2H2, FE2O3(s), H, H2, O, O2, OH, H2O, HO2, H2O2,
+    CO, CO2, HCO, OHEX, AR, N2]
+  kinetics: gas
+  reactions: all
+  transport: mixture-averaged
+  state:
+    T: 300.0
+    P: 1.01325e+05
+
+species:
+- name: FE
+  composition: {Fe: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [1.718691321, 0.01048360016, -2.701026304e-05, 2.722542745e-08, -9.712500398e-12,
+      4.918348198e+04, 9.770250646]
+    - [3.564108417, -1.597858821e-03, 8.94707628e-07, -1.664015507e-10,
+      1.03998233e-14, 4.898051469e+04, 1.851419217]
+  transport:
+    model: gas
+    geometry: atom
+    diameter: 4.3
+    well-depth: 3000.0
+- name: FE2
+  composition: {Fe: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [2.914159964, 8.189065491e-03, -1.719481601e-05, 1.629775695e-08,
+      -5.737567361e-12, 8.511643321e+04, 12.33310598]
+    - [4.361651527, 1.746291636e-04, -8.487418096e-08, 1.874915444e-11,
+      -1.556630016e-15, 8.489539567e+04, 5.78598716]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 8.3
+    well-depth: 3000.0
+- name: FE3
+  composition: {Fe: 3}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [6.636073938, -7.633283883e-04, 5.679484495e-06, -8.089396541e-09,
+      3.506771975e-12, 1.120845508e+05, 3.529332809]
+    - [6.866341537, 1.859412395e-04, -1.095559348e-07, 2.972996176e-11,
+      -2.851328557e-15, 1.119814716e+05, 2.054981496]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 10.0
+    well-depth: 3000.0
+- name: FE4
+  composition: {Fe: 4}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [8.593918218, 5.891177805e-03, -1.009485951e-05, 7.989130608e-09,
+      -2.41559901e-12, 1.359078261e+05, -2.934878061]
+    - [9.823681083, 2.486029637e-04, -1.416233205e-07, 3.652875759e-11,
+      -3.421367652e-15, 1.356873202e+05, -8.715999357]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 12.0
+    well-depth: 3000.0
+- name: FE5
+  composition: {Fe: 5}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [9.036951134, 0.02257580251, -5.051953821e-05, 4.997424457e-08, -1.811959366e-11,
+      1.573719091e+05, -5.252940373]
+    - [12.77458789, 2.906354053e-04, -1.483636703e-07, 3.388234414e-11,
+      -2.875619588e-15, 1.568482113e+05, -21.85443264]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 14.0
+    well-depth: 3000.0
+- name: FE6
+  composition: {Fe: 6}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [8.754546433, 0.04080506263, -9.083214658e-05, 8.957568891e-08, -3.240641226e-11,
+      1.730889328e+05, -3.532752544]
+    - [15.55642729, 5.656896354e-04, -2.840276557e-07, 6.403138767e-11,
+      -5.381523623e-15, 1.721217404e+05, -33.81620589]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 16.0
+    well-depth: 3000.0
+- name: FE7
+  composition: {Fe: 7}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [12.41851039, 0.03763262471, -8.441932512e-05, 8.360741215e-08, -3.032315933e-11,
+      1.91234193e+05, -16.65400803]
+    - [18.66345981, 4.167812593e-04, -2.063992099e-07, 4.606059704e-11,
+      -3.839654824e-15, 1.90352664e+05, -44.40925594]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 18.0
+    well-depth: 3000.0
+- name: FE8
+  composition: {Fe: 8}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [13.68915058, 0.04767920304, -1.072552638e-04, 1.06426004e-07, -3.864396497e-11,
+      2.069240712e+05, -21.12759994]
+    - [21.55892107, 5.547134192e-04, -2.74620785e-07, 6.121387515e-11, -5.098752593e-15,
+      2.058197555e+05, -56.06066699]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 20.0
+    well-depth: 3000.0
+- name: FECO
+  composition: {C: 1, Fe: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [3.383876144, 0.01452594021, -2.836978497e-05, 2.724946336e-08, -9.834985887e-12,
+      3.11455345e+04, 8.261092911]
+    - [5.765103692, 1.834196766e-03, -7.927043918e-07, 1.603545439e-10,
+      -1.24417539e-14, 3.072558686e+04, -2.71057419]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 5.4
+    well-depth: 1.8468e+04
+- name: FEC2O2
+  composition: {C: 2, Fe: 1, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [8.183448876, 4.149966464e-03, 1.063266714e-05, -1.967770648e-08,
+      9.060657814e-12, -87.05970726, -9.72886031]
+    - [9.645669999, 4.270457324e-03, -1.937109574e-06, 4.017026486e-10,
+      -3.168658104e-14, -620.9840914, -18.08517877]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 1.4946e+04
+- name: FEC3O3
+  composition: {C: 3, Fe: 1, O: 3}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [9.836730311, 0.01416980746, -3.617099834e-06, -9.014950724e-09, 5.885979774e-12,
+      -2.966297446e+04, -14.64110362]
+    - [13.43781504, 5.911994719e-03, -2.571837577e-06, 5.232989096e-10,
+      -4.08040987e-14, -3.06827792e+04, -33.47905459]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 1.404e+04
+- name: FEC4O4
+  composition: {C: 4, Fe: 1, O: 4}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [4.155961374, 0.08049986567, -1.616751515e-04, 1.556701818e-07, -5.602605865e-11,
+      -5.856116403e+04, 10.19883812]
+    - [17.42244623, 8.04698798e-03, -3.502159201e-06, 7.131852332e-10, -5.566153216e-14,
+      -6.078037108e+04, -50.41667823]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 2.0884e+04
+- name: FEC5O5
+  composition: {C: 5, Fe: 1, O: 5}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [1.721760191, 0.111954607, -2.197002227e-04, 2.077212064e-07, -7.384409006e-11,
+      -9.146422762e+04, 18.37890374]
+    - [20.87678969, 0.01083008421, -4.750695765e-06, 9.734120514e-10, -7.632931395e-14,
+      -9.477344158e+04, -69.81560176]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FE2CO
+  composition: {C: 1, Fe: 2, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [5.168578435, 0.01879645195, -3.827067295e-05, 3.728444894e-08, -1.353335549e-11,
+      5.62327377e+04, 7.499094426]
+    - [8.227151553, 1.882020837e-03, -8.164831056e-07, 1.656414861e-10,
+      -1.2879885e-14, 5.572225693e+04, -6.448627069]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.3
+    well-depth: 2019.0
+- name: FE3CO
+  composition: {C: 1, Fe: 3, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [7.392143458, 0.02328373779, -4.793865783e-05, 4.657318474e-08, -1.683053699e-11,
+      8.43238155e+04, 0.2423295396]
+    - [11.28455449, 1.859399158e-03, -8.187099896e-07, 1.677632634e-10,
+      -1.313574811e-14, 8.367479963e+04, -17.51700509]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FE4CO
+  composition: {C: 1, Fe: 4, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [8.841273429, 0.03184622703, -6.687324429e-05, 6.525138339e-08, -2.361173457e-11,
+      1.05781432e+05, -5.041221296]
+    - [14.16815016, 2.012735182e-03, -8.98425817e-07, 1.861505192e-10, -1.470505372e-14,
+      1.049265974e+05, -29.20274597]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.7
+    well-depth: 2019.0
+- name: FE5CO
+  composition: {C: 1, Fe: 5, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [10.93785172, 0.03650320914, -7.576197619e-05, 7.305068976e-08, -2.622635253e-11,
+      1.273969546e+05, -14.11870036]
+    - [17.26350719, 1.9724326e-03, -9.103034733e-07, 1.933416295e-10, -1.555604819e-14,
+      1.263583076e+05, -42.97675659]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FE6CO
+  composition: {C: 1, Fe: 6, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [12.2128393, 0.04732819607, -1.024816598e-04, 1.010571325e-07, -3.671453538e-11,
+      1.473684944e+05, -16.40326053]
+    - [20.01952184, 2.163693229e-03, -9.655117771e-07, 2.000755923e-10,
+      -1.580625954e-14, 1.461798657e+05, -51.47914754]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FE7CO
+  composition: {C: 1, Fe: 7, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [14.55718366, 0.05071299925, -1.086285645e-04, 1.062979188e-07, -3.846288662e-11,
+      1.691836268e+05, -27.82181328]
+    - [23.1530478, 2.108349048e-03, -9.754567229e-07, 2.074044423e-10, -1.66940063e-14,
+      1.678391086e+05, -66.66988624]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FE2C2O2
+  composition: {C: 2, Fe: 2, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [5.018826668, 0.04293358975, -8.577451533e-05, 8.207189689e-08, -2.940478993e-11,
+      2.931538591e+04, 8.730194589]
+    - [12.26925141, 3.993675374e-03, -1.746753168e-06, 3.567190028e-10,
+      -2.788456723e-14, 2.80790777e+04, -24.53376562]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 5.9
+    well-depth: 1891.0
+- name: FE3C2O2
+  composition: {C: 2, Fe: 3, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [8.816141166, 0.04133232199, -8.593469917e-05, 8.449219301e-08, -3.081143203e-11,
+      6.176114486e+04, -3.361337889]
+    - [15.44842413, 3.786090698e-03, -1.649685164e-06, 3.358915177e-10,
+      -2.619622443e-14, 6.068900108e+04, -33.41600973]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 9.0
+    well-depth: 1892.0
+- name: FE2C3O3
+  composition: {C: 3, Fe: 2, O: 3}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 4000.0]
+    data:
+    - [7.39135777, 0.05392867963, -1.068800121e-04, 1.018998805e-07, -3.641236954e-11,
+      6837.742928, 0.06811112431]
+    - [16.62456625, 5.017315892e-03, -2.101477993e-06, 4.194211508e-10,
+      -3.228906762e-14, 5228.137016, -42.45873715]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 8.6
+    well-depth: 1763.0
+- name: FEO
+  composition: {Fe: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [2.8245256, 4.3049207e-03, -4.1084781e-06, 1.3201189e-09, 7.1316217e-14,
+      2.9194035e+04, 11.891176]
+    - [4.2049817, 2.6838452e-04, -8.9426736e-08, 3.1855911e-11, -3.3922543e-15,
+      2.882917e+04, 4.83043159]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 4.3
+    well-depth: 3000.0
+  note: GUR
+- name: FEOH
+  composition: {H: 1, Fe: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 3000.0]
+    data:
+    - [4.8837095, 7.7819828e-03, -1.380387e-05, 1.0566191e-08, -2.6865749e-12,
+      1.1008916e+04, 0.56420678]
+    - [5.4559424, 1.4001569e-03, -6.2651186e-08, -5.9701066e-11, 7.6909112e-15,
+      1.116481e+04, -1.0090241]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.4
+    well-depth: 400.0
+  note: GUR
+- name: FEO2H2
+  composition: {H: 2, Fe: 1, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [-1.67667734, 0.0616931464, -1.20738995e-04, 1.09814026e-07, -3.72856831e-11,
+      -4.11289708e+04, 29.677171]
+    - [8.96262012, 4.20137342e-03, -1.61017443e-06, 2.68347076e-10, -1.63497305e-14,
+      -4.27994358e+04, -18.6912367]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.4
+    well-depth: 600.0
+  note: GUR
+- name: FEO2
+  composition: {Fe: 1, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 3000.0]
+    data:
+    - [1.7055744, 0.017983018, -2.7931294e-05, 2.1608663e-08, -6.6648996e-12,
+      8472.394, 18.025223]
+    - [6.552135, -1.100258e-04, 3.9533719e-07, -1.5170912e-10, 1.5325133e-14,
+      7334.1932, -5.9405016]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.4
+    well-depth: 400.0
+  note: GUR
+- name: FE(a)
+  composition: {Fe: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 1042.0]
+    data:
+    - [2.41337476, -1.57780744e-03, 2.14701339e-05, -3.80171438e-08, 2.20426984e-11,
+      -774.380998, -10.6560296]
+    - [4690.80173, -9.90659991, 2.69427446e-03, 5.54445321e-06, -3.01659823e-09,
+      -1.41547586e+06, -2.49294387e+04]
+- name: FE(c)
+  composition: {Fe: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [1000.0, 1665.0, 1000.0]
+    data:
+    - [61.010999, -0.160945061, 1.68369493e-04, -7.74563702e-08, 1.3309129e-11,
+      -1.65335454e+04, -313.710668]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+- name: FE(d)
+  composition: {Fe: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [1000.0, 1809.0, 1000.0]
+    data:
+    - [-435.904698, 0.768489448, -4.46898892e-04, 8.67070913e-08, 0.0, 1.87925534e+05,
+      2450.57619]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+- name: FE(L)
+  composition: {Fe: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [1000.0, 6000.0, 1000.0]
+    data:
+    - [5.53538332, 0.0, 0.0, 0.0, 0.0, -1274.28941, -29.4772271]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+- name: FEO(s)
+  composition: {Fe: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 1650.0]
+    data:
+    - [5.3195475, 2.2096591e-03, 1.0721775e-06, -2.7929729e-09, 1.3320733e-12,
+      -3.4407165e+04, -23.686034]
+    - [5.8316489, 1.4275156e-03, -9.3208143e-08, -6.5997763e-12, -2.2512143e-14,
+      -3.4566902e+04, -26.44699]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FEO(L)
+  composition: {Fe: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [1000.0, 5000.0, 1000.0]
+    data:
+    - [8.2022482, 0.0, 0.0, 0.0, 0.0, -3.3848615e+04, -40.079129]
+    - [8.2022482, 0.0, 0.0, 0.0, 0.0, -3.3848615e+04, -40.079129]
+- name: FEO2H2(s)
+  composition: {H: 2, Fe: 1, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 1500.0]
+    data:
+    - [10.091218, 4.4523141e-03, 4.0666855e-06, -4.0094525e-09, 2.3947164e-13,
+      -7.2277688e+04, -48.400034]
+    - [7.4031808, 0.011981742, -1.4957611e-06, -5.0526359e-09, 2.0037111e-12,
+      -7.1592266e+04, -34.673267]
+- name: FEO3H3(s)
+  composition: {H: 3, Fe: 1, O: 3}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 1500.0]
+    data:
+    - [4.4116836, 0.032682462, -2.2393815e-05, 2.8646792e-09, 2.2622321e-12,
+      -1.0271834e+05, -21.331014]
+    - [8.0223926, 0.016420135, -1.2369378e-07, -6.8192838e-09, 2.3276907e-12,
+      -1.0321336e+05, -37.93402]
+- name: FE2O3(s)
+  composition: {Fe: 2, O: 3}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 2500.0]
+    data:
+    - [-7.7037843, 0.13647471, -3.2905655e-04, 3.8150478e-07, -1.6310285e-10,
+      -1.0080076e+05, 25.292085]
+    - [40.49753, -0.046131596, 3.1826406e-05, -8.9226331e-09, 8.4655417e-13,
+      -1.1317627e+05, -216.35088]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 6.0
+    well-depth: 530.0
+- name: FE3O4(s)
+  composition: {Fe: 3, O: 4}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [36.198148, -0.17437976, 5.2475673e-04, -5.4238219e-07, 1.7996202e-10,
+      -1.413873e+05, -155.56683]
+    - [24.13372, 4.1592226e-05, -2.6331492e-08, 6.6035094e-12, -5.692468e-16,
+      -1.4121052e+05, -120.06412]
+- name: FE2OO2H2
+  composition: {H: 2, Fe: 2, O: 3}
+  thermo:
+    model: constant-cp
+    T0: 298.15
+    h0: 63.81 kcal/mol
+    s0: 93.36 cal/mol/K
+    cp0: 24.15 cal/mol/K
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.4
+    well-depth: 600.0
+  note: GUR
+- name: FE2OOOH
+  composition: {H: 1, Fe: 2, O: 3}
+  thermo:
+    model: constant-cp
+    T0: 298.15
+    h0: 63.81 kcal/mol
+    s0: 93.36 cal/mol/K
+    cp0: 24.15 cal/mol/K
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 4.4
+    well-depth: 600.0
+  note: GUR
+- name: H
+  composition: {H: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [2.5, 0.0, 0.0, 0.0, 0.0, 2.547366e+04, -0.44668285]
+    - [2.5, 0.0, 0.0, 0.0, 0.0, 2.547366e+04, -0.44668285]
+  transport:
+    model: gas
+    geometry: atom
+    diameter: 2.05
+    well-depth: 145.0
+  note: L6/94
+- name: H2
+  composition: {H: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [2.34433112, 7.98052075e-03, -1.9478151e-05, 2.01572094e-08, -7.37611761e-12,
+      -917.935173, 0.683010238]
+    - [2.93286575, 8.26608026e-04, -1.46402364e-07, 1.54100414e-11, -6.888048e-16,
+      -813.065581, -1.02432865]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 2.92
+    well-depth: 38.0
+    polarizability: 0.79
+    rotational-relaxation: 280.0
+  note: TPIS78
+- name: O
+  composition: {O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [3.1682671, -3.27931884e-03, 6.64306396e-06, -6.12806624e-09, 2.11265971e-12,
+      2.91222592e+04, 2.05193346]
+    - [2.54363697, -2.73162486e-05, -4.1902952e-09, 4.95481845e-12, -4.79553694e-16,
+      2.9226012e+04, 4.92229457]
+  transport:
+    model: gas
+    geometry: atom
+    diameter: 2.75
+    well-depth: 80.0
+  note: L1/90
+- name: O2
+  composition: {O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [3.78245636, -2.99673416e-03, 9.84730201e-06, -9.68129509e-09, 3.24372837e-12,
+      -1063.94356, 3.65767573]
+    - [3.66096065, 6.56365811e-04, -1.41149627e-07, 2.05797935e-11, -1.29913436e-15,
+      -1215.97718, 3.41536279]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 3.458
+    well-depth: 107.4
+    polarizability: 1.6
+    rotational-relaxation: 3.8
+  note: RUS89
+- name: OH
+  composition: {H: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [3.99198424, -2.40106655e-03, 4.61664033e-06, -3.87916306e-09, 1.36319502e-12,
+      3368.89836, -0.103998477]
+    - [2.83853033, 1.10741289e-03, -2.94000209e-07, 4.20698729e-11, -2.4228989e-15,
+      3697.80808, 5.84494652]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 2.75
+    well-depth: 80.0
+  note: IU3/03
+- name: H2O
+  composition: {H: 2, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [4.1986352, -2.0364017e-03, 6.5203416e-06, -5.4879269e-09, 1.771968e-12,
+      -3.0293726e+04, -0.84900901]
+    - [2.6770389, 2.9731816e-03, -7.7376889e-07, 9.4433514e-11, -4.2689991e-15,
+      -2.9885894e+04, 6.88255]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 2.605
+    well-depth: 572.4
+    dipole: 1.844
+    rotational-relaxation: 4.0
+  note: L5/89
+- name: N2
+  composition: {N: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [3.53100528, -1.23660988e-04, -5.02999433e-07, 2.43530612e-09, -1.40881235e-12,
+      -1046.97628, 2.96747038]
+    - [2.95257637, 1.3969004e-03, -4.92631603e-07, 7.86010195e-11, -4.60755204e-15,
+      -923.948688, 5.87188762]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 3.621
+    well-depth: 97.53
+    polarizability: 1.76
+    rotational-relaxation: 4.0
+  note: G8/02
+- name: HO2
+  composition: {H: 1, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 5000.0]
+    data:
+    - [4.30179807, -4.74912097e-03, 2.11582905e-05, -2.42763914e-08, 9.29225225e-12,
+      264.018485, 3.7166622]
+    - [4.17228741, 1.88117627e-03, -3.46277286e-07, 1.94657549e-11, 1.76256905e-16,
+      31.0206839, 2.95767672]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 3.458
+    well-depth: 107.4
+    rotational-relaxation: 1.0
+  note: T1/09
+- name: H2O2
+  composition: {H: 2, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [4.31515149, -8.47390622e-04, 1.76404323e-05, -2.26762944e-08, 9.08950158e-12,
+      -1.77067437e+04, 3.27373319]
+    - [4.57977305, 4.05326003e-03, -1.2984473e-06, 1.982114e-10, -1.13968792e-14,
+      -1.80071775e+04, 0.664970694]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 3.458
+    well-depth: 107.4
+    rotational-relaxation: 3.8
+  note: T8/03
+- name: AR
+  composition: {Ar: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.37967491]
+    - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.37967491]
+  transport:
+    model: gas
+    geometry: atom
+    diameter: 3.33
+    well-depth: 136.5
+  note: G5/97
+- name: CO
+  composition: {C: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [3.5795335, -6.1035369e-04, 1.0168143e-06, 9.0700586e-10, -9.0442449e-13,
+      -1.4344086e+04, 3.5084093]
+    - [3.0484859, 1.3517281e-03, -4.8579405e-07, 7.8853644e-11, -4.6980746e-15,
+      -1.4266117e+04, 6.0170977]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 3.65
+    well-depth: 98.1
+    polarizability: 1.95
+    rotational-relaxation: 1.8
+  note: RUS79
+- name: CO2
+  composition: {C: 1, O: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [2.356813, 8.9841299e-03, -7.1220632e-06, 2.4573008e-09, -1.4288548e-13,
+      -4.8371971e+04, 9.9009035]
+    - [4.6365111, 2.7414569e-03, -9.9589759e-07, 1.6038666e-10, -9.1619857e-15,
+      -4.9024904e+04, -1.9348955]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 3.763
+    well-depth: 244.0
+    polarizability: 2.65
+    rotational-relaxation: 2.1
+  note: L7/88
+- name: HCO
+  composition: {H: 1, C: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 6000.0]
+    data:
+    - [4.2375461, -3.32075257e-03, 1.40030264e-05, -1.34239995e-08, 4.37416208e-12,
+      3872.41185, 3.30834869]
+    - [3.92001542, 2.52279324e-03, -6.71004164e-07, 1.05615948e-10, -7.43798261e-15,
+      3653.42928, 3.58077056]
+  transport:
+    model: gas
+    geometry: nonlinear
+    diameter: 3.59
+    well-depth: 498.0
+  note: T5/03
+- name: OHEX
+  composition: {H: 1, O: 1}
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [3.637266, 1.85091e-04, -1.6761646e-06, 2.387202e-09, -8.431442e-13,
+      5.00213e+04, 1.3588605]
+    - [2.88273, 1.0139743e-03, -2.276877e-07, 2.174683e-11, -5.126305e-16,
+      5.0265e+04, 5.595712]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 2.75
+    well-depth: 80.0
+
+reactions:
+- equation: FEC5O5 => FE + 5 CO  # Reaction 1
+  rate-constant: {A: 6.08091e+08, b: 0, Ea: 1.727733e+04}
+- equation: FE + FE + M => FE2 + M  # Reaction 2
+  type: three-body
+  rate-constant: {A: 4.663e+19, b: 0, Ea: 0.0}
+- equation: FE2 + M => FE + FE + M  # Reaction 3
+  type: three-body
+  rate-constant: {A: 4.35e+19, b: 0, Ea: 3.534902e+04}
+- equation: FE + FE2 + M => FE3 + M  # Reaction 4
+  type: three-body
+  rate-constant: {A: 1.0e+20, b: 0, Ea: 0.0}
+- equation: FE3 + M => FE2 + FE + M  # Reaction 5
+  type: three-body
+  rate-constant: {A: 6.709967e+17, b: 0, Ea: 3.812928e+04}
+- equation: FE + FE3 + M => FE4 + M  # Reaction 6
+  type: three-body
+  rate-constant: {A: 1.0e+20, b: 0, Ea: 0.0}
+- equation: FE4 + M => FE3 + FE + M  # Reaction 7
+  type: three-body
+  rate-constant: {A: 6.20979e+17, b: 0, Ea: 4.289544e+04}
+- equation: FE + FE4 => FE5  # Reaction 8
+  rate-constant: {A: 1.896727e+15, b: 0, Ea: 0.0}
+- equation: FE5 => FE4 + FE  # Reaction 9
+  rate-constant: {A: 1.323507e+20, b: 0, Ea: 4.607288e+04}
+- equation: FE + FE5 => FE6  # Reaction 10
+  rate-constant: {A: 7.999359e+14, b: 0, Ea: 0.0}
+- equation: FE6 => FE5 + FE  # Reaction 11
+  rate-constant: {A: 7.183616e+12, b: 0, Ea: 4.845596e+04}
+- equation: FE + FE6 => FE7  # Reaction 12
+  rate-constant: {A: 5.081113e+14, b: 0, Ea: 0.0}
+- equation: FE7 => FE6 + FE  # Reaction 13
+  rate-constant: {A: 7.910606e+11, b: 0, Ea: 5.044186e+04}
+- equation: FE2 + FE2 => FE4  # Reaction 14
+  rate-constant: {A: 1.642913e+15, b: 0, Ea: 0.0}
+- equation: FE2 + FE3 => FE5  # Reaction 15
+  rate-constant: {A: 5.0e+15, b: 0, Ea: 0.0}
+- equation: FE2 + FE4 => FE6  # Reaction 16
+  rate-constant: {A: 2.373875e+15, b: 0, Ea: 0.0}
+- equation: FE3 + FE3 => FE6  # Reaction 17
+  rate-constant: {A: 7.018186e+09, b: 0, Ea: 0.0}
+- equation: FE3 + FE4 => FE7  # Reaction 18
+  rate-constant: {A: 5.712728e+14, b: 0, Ea: 0.0}
+- equation: FE + CO2 <=> FEO + CO  # Reaction 19
+  rate-constant: {A: 9.269063e+08, b: 0, Ea: 2.97885e+04}
+- equation: FEO + CO2 <=> FEO2 + CO  # Reaction 20
+  rate-constant: {A: 4.628716e+08, b: 0, Ea: 4.56757e+04}
+- equation: FE + O2 + M <=> FEO2 + M  # Reaction 21
+  type: three-body
+  rate-constant: {A: 2.34e+26, b: -2.6, Ea: 1100.1886}
+- equation: FEO + O2 <=> FEO2 + O  # Reaction 22
+  rate-constant: {A: 3.096768e+10, b: 0.4, Ea: 1.628438e+04}
+- equation: FE + O2 <=> FEO + O  # Reaction 23
+  rate-constant: {A: 1.42e+15, b: 0.022, Ea: 2.22917275e+04}
+- equation: FEOH + H <=> FEO + H2  # Reaction 24
+  rate-constant: {A: 2.857356e+13, b: 0, Ea: 1588.72}
+- equation: FEO + H2O <=> FEO2H2  # Reaction 25
+  rate-constant: {A: 5.212351e+12, b: 0, Ea: 0.0}
+- equation: FEO2H2 + H <=> FEOH + H2O  # Reaction 26
+  rate-constant: {A: 9.292088e+13, b: 0, Ea: 595.77}
+- equation: FEO + H <=> FE + OH  # Reaction 27
+  rate-constant: {A: 7.200312e+13, b: 0, Ea: 5997.418}
+- equation: FEO + H2 <=> FE + H2O  # Reaction 28
+  rate-constant: {A: 1.758351e+13, b: 0, Ea: 4996.5244}
+- equation: FEO2 + OH <=> FEOH + O2  # Reaction 29
+  rate-constant: {A: 1.0e+14, b: 0, Ea: 1.1994836e+04}
+- equation: FEOH + O <=> FEO + OH  # Reaction 30
+  rate-constant: {A: 5.947123e+13, b: 0, Ea: 1499.3545}
+- equation: FEOH + H <=> FE + H2O  # Reaction 31
+  rate-constant: {A: 1.015542e+12, b: 0, Ea: 1199.4836}
+- equation: FEO2H2 + FEO => FE2OOOH + H  # Reaction 32
+  rate-constant: {A: 9.829565e+12, b: 0.0, Ea: 0.0}
+- equation: FEO2H2 + FEO2H2 => FE2OO2H2 + H2O  # Reaction 33
+  rate-constant: {A: 8.5e+12, b: 0, Ea: 0.0}
+- equation: FE2OO2H2 => FE2OOOH + H  # Reaction 34
+  rate-constant: {A: 2.826219e+05, b: 0, Ea: 0.0}
+- equation: FE2OOOH + OH => FE2O3(s) + H2O  # Reaction 35
+  rate-constant: {A: 3.538072e+11, b: 0, Ea: 0.0}
+- equation: FE2O3(s) + 3 H2 => 2 FE + 3 H2O  # Reaction 36
+  rate-constant: {A: 4.315186e+25, b: 0, Ea: 5997.418}
+- equation: FE2O3(s) + 3 CO => 2 FE + 3 CO2  # Reaction 37
+  rate-constant: {A: 4.886948e+22, b: 0, Ea: 1999.8013}
+- equation: H + O2 <=> O + OH  # Reaction 38
+  rate-constant: {A: 5.0712e+15, b: -0.48596, Ea: 1.611776299e+04}
+- equation: O + H2 <=> H + OH  # Reaction 39
+  rate-constant: {A: 1.2554e+06, b: 2.27039, Ea: 6953.03308}
+- equation: OH + H2 <=> H + H2O  # Reaction 40
+  rate-constant: {A: 1.3193e+07, b: 1.87803, Ea: 3149.24022}
+- equation: 2 OH <=> O + H2O  # Reaction 41
+  rate-constant: {A: 8.4999e+04, b: 2.26419, Ea: -1783.794957}
+- equation: 2 H + M <=> H2 + M  # Reaction 42
+  type: three-body
+  rate-constant: {A: 4.9806e+18, b: -1.21273, Ea: 611.696918}
+  efficiencies: {AR: 1.0, CO: 1.9, CO2: 3.8, H2: 2.5, H2O: 12.0, O2: 1.0}
+- equation: 2 O + M <=> O2 + M  # Reaction 43
+  type: three-body
+  rate-constant: {A: 6.165e+15, b: -0.5, Ea: 0.0}
+  efficiencies: {AR: 0.83, CO: 1.9, CO2: 3.8, H2: 2.5, H2O: 12.0}
+- equation: O + H + M <=> OH + M  # Reaction 44
+  type: three-body
+  rate-constant: {A: 4.714e+18, b: -1.0, Ea: 0.0}
+  efficiencies: {AR: 0.75, CO: 1.5, CO2: 2.0, H2: 2.5, H2O: 12.0, O2: 1.0}
+- equation: H + OH + M <=> H2O + M  # Reaction 45
+  type: three-body
+  rate-constant: {A: 1.4818e+24, b: -2.53792, Ea: 120.7188892}
+  efficiencies: {AR: 0.38, CO: 1.9, CO2: 3.8, H2: 2.5, H2O: 12.0, O2: 1.0}
+- equation: H + O2 (+ M) <=> HO2 (+ M)  # Reaction 46
+  type: falloff
+  low-P-rate-constant: {A: 5.2669e+19, b: -1.37367, Ea: 0.0}
+  high-P-rate-constant: {A: 4.65e+12, b: 0.44, Ea: 0.0}
+  Troe: {A: 0.67, T3: 1.0e-30, T1: 1.0e+30, T2: 1.0e+30}
+  efficiencies: {AR: 0.474, CO: 1.9, CO2: 3.8, H2: 1.511, H2O: 11.372, O2: 1.0}
+- equation: H + HO2 <=> H2 + O2  # Reaction 47
+  rate-constant: {A: 2.1231e+06, b: 2.1133, Ea: -1623.830712}
+- equation: HO2 + H <=> 2 OH  # Reaction 48
+  rate-constant: {A: 5.7734e+13, b: 0.0, Ea: 170.926413}
+- equation: HO2 + O <=> OH + O2  # Reaction 49
+  rate-constant: {A: 3.25e+13, b: 0.0, Ea: 0.0}
+- equation: HO2 + OH <=> H2O + O2  # Reaction 50
+  rate-constant: {A: 9.584e+11, b: 0.42008, Ea: -948.06866}
+- equation: 2 HO2 <=> H2O2 + O2  # Reaction 51
+  rate-constant: {A: 1.3e+11, b: 0.0, Ea: -1629.093347}
+  duplicate: true
+- equation: 2 HO2 <=> H2O2 + O2  # Reaction 52
+  rate-constant: {A: 1.6048e+15, b: 0.0, Ea: 1.554085904e+04}
+  duplicate: true
+- equation: 2 OH (+ M) <=> H2O2 (+ M)  # Reaction 53
+  type: falloff
+  low-P-rate-constant: {A: 1.9928e+18, b: -1.17797, Ea: -4270.300629}
+  high-P-rate-constant: {A: 2.148e+05, b: 2.3219, Ea: -3400.476429}
+  Troe: {A: 0.43, T3: 1.0e-30, T1: 1.0e+30, T2: 1.0e+30}
+  efficiencies: {AR: 0.67, CO: 1.87, CO2: 1.07, H2: 2.47, H2O: 5.0, H2O2: 5.13,
+    O2: 0.8}
+- equation: H2O2 + H <=> H2O + OH  # Reaction 54
+  rate-constant: {A: 2.41e+13, b: 0.0, Ea: 3967.808341}
+- equation: H2O2 + H <=> H2 + HO2  # Reaction 55
+  rate-constant: {A: 9.7543e+19, b: -1.92495, Ea: 9419.91806}
+- equation: H2O2 + O <=> OH + HO2  # Reaction 56
+  rate-constant: {A: 9.55e+06, b: 2.0, Ea: 3967.808341}
+- equation: H2O2 + OH <=> H2O + HO2  # Reaction 57
+  rate-constant: {A: 1.74e+12, b: 0.0, Ea: 317.823436}
+  duplicate: true
+- equation: H2O2 + OH <=> H2O + HO2  # Reaction 58
+  rate-constant: {A: 7.59e+13, b: 0.0, Ea: 7264.978252}
+  duplicate: true
+- equation: CO + O (+ M) <=> CO2 (+ M)  # Reaction 59
+  type: falloff
+  low-P-rate-constant: {A: 1.173e+24, b: -2.79, Ea: 4188.680139}
+  high-P-rate-constant: {A: 1.362e+10, b: 0.0, Ea: 2382.68282}
+  efficiencies: {AR: 0.7, CO: 1.75, CO2: 3.6, H2: 2.0, H2O: 12.0}
+- equation: CO + O2 <=> CO2 + O  # Reaction 60
+  rate-constant: {A: 2.8865e+12, b: 0.0, Ea: 4.76715295e+04}
+- equation: CO + OH <=> CO2 + H  # Reaction 61
+  rate-constant: {A: 1.6596e+04, b: 2.22171, Ea: -1379.684166}
+- equation: CO + HO2 <=> CO2 + OH  # Reaction 62
+  rate-constant: {A: 1.5144e+07, b: 1.67957, Ea: 1.814854433e+04}
+- equation: HCO (+ M) <=> H + CO (+ M)  # Reaction 63
+  type: falloff
+  low-P-rate-constant: {A: 4.9426e+10, b: 0.95965, Ea: 1.463191261e+04}
+  high-P-rate-constant: {A: 4.93e+16, b: -0.93, Ea: 1.97140293e+04}
+  Troe: {A: 0.852, T3: 51.4, T1: 3570, T2: 3420}
+  efficiencies: {AR: 0.55, CO: 1.5, CO2: 2.0, H2: 2.0, H2O: 12.0, O2: 1.0}
+- equation: HCO + O2 <=> CO + HO2  # Reaction 64
+  rate-constant: {A: 7.58e+12, b: 0.0, Ea: 409.770606}
+- equation: HCO + H <=> CO + H2  # Reaction 65
+  rate-constant: {A: 6.4126e+13, b: 0.0, Ea: 0.0}
+- equation: HCO + O <=> CO + OH  # Reaction 66
+  rate-constant: {A: 3.02e+13, b: 0.0, Ea: 0.0}
+- equation: HCO + O <=> CO2 + H  # Reaction 67
+  rate-constant: {A: 3.0e+13, b: 0.0, Ea: 0.0}
+- equation: HCO + OH <=> CO + H2O  # Reaction 68
+  rate-constant: {A: 1.02e+14, b: 0.0, Ea: 0.0}
+- equation: HCO + HO2 => CO2 + H + OH  # Reaction 69
+  rate-constant: {A: 3.0e+13, b: 0.0, Ea: 0.0}
+- equation: 2 HCO => H2 + 2 CO  # Reaction 70
+  rate-constant: {A: 3.0e+12, b: 0.0, Ea: 0.0}
+- equation: H + O + M <=> OHEX + M  # Reaction 71
+  type: three-body
+  rate-constant: {A: 1.5e+13, b: 0.0, Ea: 5971.700595}
+  efficiencies: {AR: 0.35, H2: 1.0, H2O: 6.5, N2: 0.4, O2: 0.4}
+- equation: OHEX + H2O <=> OH + H2O  # Reaction 72
+  rate-constant: {A: 5.93e+12, b: 0.5, Ea: -859.517379}
+- equation: OHEX + H2 <=> OH + H2  # Reaction 73
+  rate-constant: {A: 2.95e+12, b: 0.5, Ea: -443.749355}
+- equation: OHEX + N2 <=> OH + N2  # Reaction 74
+  rate-constant: {A: 1.08e+11, b: 0.5, Ea: -1241.306654}
+- equation: OHEX + OH <=> 2 OH  # Reaction 75
+  rate-constant: {A: 6.01e+12, b: 0.5, Ea: -763.57855}
+- equation: OHEX + H <=> OH + H  # Reaction 76
+  rate-constant: {A: 1.31e+12, b: 0.5, Ea: -166.914895}
+- equation: OHEX + AR <=> OH + AR  # Reaction 77
+  rate-constant: {A: 1.69e+12, b: 0.0, Ea: 4132.717477}
+- equation: OHEX => OH  # Reaction 78
+  rate-constant: {A: 1.45e+06, b: 0.0, Ea: 0.0}
+- equation: OHEX + O2 <=> OH + O2  # Reaction 79
+  rate-constant: {A: 2.1e+12, b: 0.5, Ea: -477.728104}
+- equation: OHEX + CO2 <=> OH + CO2  # Reaction 80
+  rate-constant: {A: 2.75e+12, b: 0.5, Ea: -967.470903}
+- equation: OHEX + CO <=> OH + CO  # Reaction 81
+  rate-constant: {A: 3.23e+12, b: 0.5, Ea: -786.555413}

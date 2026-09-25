@@ -30,7 +30,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_bench'
+output = 'run/burnerFla_diffBC'
 
 # Same reactant composition as single_Igor_nucl.py
 X_FEC5O5 = 0.0005
@@ -50,6 +50,18 @@ u_in = 1.1
 xLeft = 0.0
 xRight = 0.08
 nPoints = 200
+
+# Continue from a previously saved profile instead of the tanh guess built
+# below; None starts fresh. Point this at a *copy* of the profile rather than
+# at a profNow.h5 inside an active output directory -- that file is
+# overwritten as the new run proceeds, so you'd lose the restart point.
+# Two things to know: the clock restarts at times.tStart (t is not read from
+# the file), and the particle moments are NOT restored -- readInitialCondition
+# reads only x, T, U, V, Y. For the particles case that means a restart gives
+# a converged gas field with particles starting from zero, which is a useful
+# way to let nucleation begin from a settled flame rather than fighting the
+# initial transient.
+restartFile = 'run/burnerFla_bench/restart.h5'
 
 # --- Reference solution: Cantera BurnerFlame, same mechanism/composition ---
 gas = ct.Solution(mechanism)
@@ -116,6 +128,7 @@ conf = Config(
     InitialCondition(reactants=react,
                       pressure=pressure,
                       Tu=Tu,
+                      restartFile=restartFile,
                       xLeft=xLeft,
                       xRight=xRight,
                       haveProfiles=True,

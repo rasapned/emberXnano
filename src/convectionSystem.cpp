@@ -328,9 +328,10 @@ int ConvectionSystemY::f(const realtype t, const sdVector& y, sdVector& ydot)
     // *** Calculate dY/dt
 
     // Left boundary conditions.
-    // Convection term only contributes in the ControlVolume case
+    // Convection term only contributes in the ControlVolume/InletFlux cases
     if (grid.leftBC == BoundaryCondition::ControlVolume ||
-        grid.leftBC == BoundaryCondition::WallFlux)
+        grid.leftBC == BoundaryCondition::WallFlux ||
+        grid.leftBC == BoundaryCondition::InletFlux)
     {
         double centerVol = pow(x[1],alpha+1) / (alpha+1);
         // Note: v[0] actually contains r*v[0] in this case

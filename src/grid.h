@@ -19,6 +19,15 @@ namespace BoundaryCondition {
      //! Flux of y at the boundary driven by difference between yLeft and y[0]
      WallFlux,
 
+     //! Burner-style inlet: the boundary value is set by a flux balance over
+     //! the control volume from x[0] to x[1], so that the convective plus
+     //! diffusive flux crossing the face equals the supplied stream's flux
+     //! (mdot * yLeft). Unlike #FixedValue, y[0] is free to differ from
+     //! yLeft, which is what lets species diffuse upstream toward the face.
+     //! Temperature is still held at Tleft (the burner face is a heat sink),
+     //! matching Cantera's BurnerFlame treatment.
+     InletFlux,
+
      //! Outflow boundary condition
      Floating
     };

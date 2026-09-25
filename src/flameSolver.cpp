@@ -142,6 +142,11 @@ void FlameSolver::setupStep()
         if (nMoments > 0) {
             moments.col(0) = momentsLeft;
         }
+    } else if (grid.leftBC == BoundaryCondition::InletFlux) {
+        // Only temperature is held at the inlet value: the burner face acts
+        // as a heat sink. Species and moments are left alone so that the
+        // convective + diffusive flux balance at the face determines them.
+        T(0) = Tleft;
     }
 
     if (grid.rightBC == BoundaryCondition::FixedValue) {
@@ -659,6 +664,16 @@ void FlameSolver::updateBC()
 
     if (options.wallFlux && x[0] >= 0.0 && x[0] <= options.centerGridMin) {
         grid.leftBC = BoundaryCondition::WallFlux;
+    } else if (grid.ju == 0 &&
+               options.continuityBC == ContinuityBoundaryCondition::Left &&
+               options.fixedLeftLoc &&
+               !options.twinFlame && !options.cylindricalFlame) {
+        // Burner-stabilized inlet: unburned stream enters at x = 0 with a
+        // prescribed mass flux, and the user has declared x = 0 a fixed
+        // physical face (fixedLeftLocation). Use a flux-balance condition so
+        // the face composition can differ from the supplied composition, as
+        // in Cantera's BurnerFlame -- see BoundaryCondition::InletFlux.
+        grid.leftBC = BoundaryCondition::InletFlux;
     } else if (grid.ju == 0 || (grid.jb == 0 && grid.fixedBurnedVal)) {
         grid.leftBC = BoundaryCondition::FixedValue;
     } else if ((options.twinFlame || options.cylindricalFlame) &&
@@ -667,7 +682,7 @@ void FlameSolver::updateBC()
     } else {
         grid.leftBC = BoundaryCondition::ZeroGradient;
     }
-
+    
     if (options.flameType == "premixed" && grid.jb == jj && !grid.fixedBurnedVal) {
         grid.rightBC = BoundaryCondition::Floating;
     } else {

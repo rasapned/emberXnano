@@ -24,7 +24,8 @@ void DiffusionSystem::get_A(dvec& a, dvec& b, dvec& c)
     size_t jStart;
     if (grid.leftBC == BoundaryCondition::FixedValue) {
         jStart = 1;
-    } else if (grid.leftBC == BoundaryCondition::ControlVolume) {
+    } else if (grid.leftBC == BoundaryCondition::ControlVolume ||
+               grid.leftBC == BoundaryCondition::InletFlux) {
         jStart =  1;
         double c0 = B[0] * (grid.alpha + 1) * (D[0]+D[1]) / (2 * hh[0] * hh[0]);
         b[0] = -c0;
