@@ -16,6 +16,13 @@ void DiffusionSystem::get_A(dvec& a, dvec& b, dvec& c)
         c1[j] = 0.5*B[j]/(dlj[j]*r[j]);
         c2[j] = rphalf[j]*(D[j]+D[j+1])/hh[j];
     }
+    // Conductance of the first face (x[0]..x[1]), used by a[1] below. The
+    // j = 0 boundary rows already exchange flux across this face with j = 1;
+    // without c2[0], j = 1 never sees the other side of that exchange
+    // (a[1] = 0), so the flux is created/destroyed there instead of
+    // conserved. Harmless for a zero-gradient far field, but at a burner
+    // face it drained ~1/3 of the inlet H and cut off the wall heat loss.
+    c2[0] = rphalf[0]*(D[0]+D[1])/hh[0];
 
     assert(mathUtils::notnan(c1));
     assert(mathUtils::notnan(c2));
@@ -24,6 +31,9 @@ void DiffusionSystem::get_A(dvec& a, dvec& b, dvec& c)
     size_t jStart;
     if (grid.leftBC == BoundaryCondition::FixedValue) {
         jStart = 1;
+        // Clear coefficients left over if this system used a flux BC before
+        b[0] = 0;
+        c[0] = 0;
     } else if (grid.leftBC == BoundaryCondition::ControlVolume ||
                grid.leftBC == BoundaryCondition::InletFlux) {
         jStart =  1;

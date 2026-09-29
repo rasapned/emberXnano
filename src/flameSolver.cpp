@@ -222,6 +222,13 @@ void FlameSolver::prepareIntegrators()
         }
     }
 
+    // Burner-stabilized inlet: T(0) is held at Tleft (see setupStep), so the
+    // energy equation must not diffuse there. Species and moments keep the
+    // InletFlux stencil so their face values follow from the flux balance.
+    if (grid.leftBC == BoundaryCondition::InletFlux) {
+        diffusionTerms[kEnergy].grid.leftBC = BoundaryCondition::FixedValue;
+    }
+
     setDiffusionSolverState(tNow);
     for (size_t i=0; i<nVars; i++) {
         diffusionTerms[i].splitConst = splitConstDiff.row(i);
@@ -254,6 +261,18 @@ void FlameSolver::prepareIntegrators()
 int FlameSolver::finishStep()
 {
     logFile.verboseWrite("done!");
+
+    // Burner-stabilized inlet: T(0) is prescribed (reset to Tleft in
+    // setupStep), so any change the operators made to it is not a real rate.
+    // Left in, it enters drhodt and continuity turns it into a spurious mass
+    // source at the burner face; it also feeds the split constants and the
+    // dTdt termination measure.
+    if (grid.leftBC == BoundaryCondition::InletFlux) {
+        ddtConv(kEnergy, 0) = 0;
+        ddtDiff(kEnergy, 0) = 0;
+        ddtProd(kEnergy, 0) = 0;
+        ddtCross(kEnergy, 0) = 0;
+    }
 
     // *** End of Strang-split integration step ***
     correctMassFractions();
@@ -856,6 +875,19 @@ void FlameSolver::integrateProductionTerms(size_t j1, size_t j2)
 
     int err = 0;
     for (size_t j=j1; j<j2; j++) {
+        if (j == 0 && grid.leftBC == BoundaryCondition::InletFlux) {
+            // Burner face: no chemistry, as in Cantera's burner boundary. T is
+            // held at Tleft, and species/moments are set only by the inlet
+            // flux balance. Letting chemistry run here (with T free inside
+            // the stage and Y never reset) turns the face into an igniter.
+            double dtStage = tStageEnd - tStageStart;
+            U(0) += splitConstProd(kMomentum, 0) * dtStage;
+            Y.col(0) += splitConstProd.col(0).segment(kSpecies, nSpec) * dtStage;
+            if (nMoments > 0) {
+                moments.col(0) += splitConstProd.col(0).segment(kMoments, nMoments) * dtStage;
+            }
+            continue;
+        }
         SourceSystem& system = sourceTerms[j];
         logFile.verboseWrite(format("%i") % j, false);
         system.setGas(&gas);
@@ -1023,6 +1055,12 @@ void FlameSolver::calculateQdot()
         gas.getEnthalpies(&hk(0,j));
         gas.getReactionRates(&wDot(0,j));
         qDot[j] = - (wDot.col(j) * hk.col(j)).sum();
+    }
+    // No chemistry is integrated at the burner face (see
+    // integrateProductionTerms), so don't report heat release there either
+    if (grid.leftBC == BoundaryCondition::InletFlux) {
+        wDot.col(0).setZero();
+        qDot[0] = 0;
     }
     reactionRatesTimer.stop();
 }
