@@ -3,18 +3,22 @@
 Burner-stabilized flame in ember: single premixed inlet at a prescribed mass
 flux (no opposing stream), unstrained (a=0), free/adiabatic outlet.
 
-Ember's initial guess is a crude, smooth tanh ramp from unburned to
-equilibrium -- deliberately NOT the fully converged Cantera BurnerFlame
-solution (solved separately below, purely as a reference to validate
-against). Ember integrates the transient PDE via Strang-split sub-stepping
-(convection/diffusion/production evaluated as separate, sequentially-coupled
-sub-steps, unlike Cantera's fully-implicit steady Newton solve), so handing
-it an already-converged profile means its sharply-peaked, near-zero-balanced
-trace radicals (O, H, HO2, ...) get evaluated by a single operator alone for
-a sub-step, before any splitConst cross-term estimate even exists -- easily
-enough to drive them slightly negative. A crude ramp has nothing precariously
-balanced yet, so it can't undershoot through zero this way; ember is designed
-to develop the real balance over physical time.
+Ember's initial guess is chosen by initMode: by default the converged
+Cantera BurnerFlame solution (solved below, also used as the reference to
+validate against), which converges fastest. 'shifted' and 'tanh' start
+elsewhere on purpose, to check that the steady state doesn't depend on the
+initial condition; their plots also show the 'cantera' ember run
+(referenceOutput) for direct comparison. Before the burner-face fixes, the
+tanh start flashed back to the burner, was quenched and washed out (seen in
+run/burnerFla_diffBC_corr).
+
+Caveat with a converged start: ember integrates the transient PDE via
+Strang-split sub-stepping, so on the first step the sharply-peaked,
+near-zero-balanced trace radicals (O, H, HO2, ...) are advanced by each
+operator alone before any splitConst estimate exists, which can push them
+slightly negative. The Cantera profile is clipped to Y >= 0 and
+renormalized; if a first-step undershoot still causes trouble, that is
+where to look.
 
 Because ember's automatic profile generator ties the fixed-left mass flux to
 the strain rate (u = a*z potential-flow relation), it has no formula for V
@@ -24,13 +28,15 @@ build of V identically 0 too). So we build the initial profile by hand with
 haveProfiles=True.
 """
 from ember import *
+import os
+import glob
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_diffBC'
+output = 'run/burnerFla'
 
 # Same reactant composition as single_Igor_nucl.py
 X_FEC5O5 = 0.0005
@@ -50,18 +56,20 @@ u_in = 1.1
 xLeft = 0.0
 xRight = 0.08
 nPoints = 200
+gridMin = 1e-5
 
-# Continue from a previously saved profile instead of the tanh guess built
-# below; None starts fresh. Point this at a *copy* of the profile rather than
-# at a profNow.h5 inside an active output directory -- that file is
-# overwritten as the new run proceeds, so you'd lose the restart point.
-# Two things to know: the clock restarts at times.tStart (t is not read from
-# the file), and the particle moments are NOT restored -- readInitialCondition
-# reads only x, T, U, V, Y. For the particles case that means a restart gives
-# a converged gas field with particles starting from zero, which is a useful
-# way to let nucleation begin from a settled flame rather than fighting the
-# initial transient.
-restartFile = 'run/burnerFla_bench/restart.h5'
+# Continue the run in the output folder (chosen by initMode below) from its
+# last saved state, profNow.h5, in the same folder: the clock resumes at the
+# saved time (Times.tStart) and the profNNNNNN.h5 numbering continues after
+# the last file. tMin/tEnd in TerminationCondition are absolute times, so
+# raise tEnd past the saved time to actually run longer. The profile is
+# loaded here in Python rather than via InitialCondition(restartFile=...) so
+# that its first point can be reset to the reactants: that point is the
+# burner-face composition, and ember would otherwise take it as the inlet
+# stream (see the note at the Cantera start below). out.h5 is rewritten from
+# scratch by every run, so the earlier part is kept as out_until_<t>s.h5.
+# Particle moments are not carried over.
+restart = False
 
 # --- Reference solution: Cantera BurnerFlame, same mechanism/composition ---
 gas = ct.Solution(mechanism)
@@ -85,25 +93,94 @@ flame.solve(loglevel=1, refine_grid=True, auto=True)
 print(f"Cantera BurnerFlame: unburned velocity = {flame.velocity[0]:.4f} m/s "
       f"(u_in = {u_in} m/s), Tb = {flame.T[-1]:.1f} K")
 
-# --- Build ember's initial guess: a crude, smooth tanh ramp (see module
-# docstring for why this -- not the converged Cantera profile -- is what
-# gets handed to Ember) --------------------------------------------------
-x_flame_guess = xLeft + 0.15 * (xRight - xLeft)
-flameThickness_guess = 0.02 * (xRight - xLeft)
+# --- Build ember's initial guess (see module docstring) ------------------
+# 'cantera': converged Cantera BurnerFlame (fastest convergence)
+# 'shifted': the Cantera profile moved initShift downstream, fresh reactants
+#            filling the gap -- the flame must travel back to its standoff,
+#            so the result shows the steady state doesn't depend on the start
+# 'tanh':    crude ramp from reactants to adiabatic equilibrium (the hardest
+#            start: wrong position, thickness and temperature)
+initMode = 'tanh'
+initShift = 4e-3  # [m], used by 'shifted' only
+if initMode == 'shifted':
+    output += f'_shifted{initShift*1e3:g}mm'
+elif initMode == 'tanh':
+    output += '_tanh'
+# Converged run to compare the other starts against in the plots below
+referenceOutput = 'run/burnerFla_canteraInit'
 
-gas.TPX = Tu, pressure, react
-Yu = gas.Y.copy()
-gas.equilibrate('HP')
-Tb = gas.T
-Yb = gas.Y.copy()
-print(f"Adiabatic flame temperature: {Tb:.1f} K")
+if initMode in ('cantera', 'shifted'):
+    shift = initShift if initMode == 'shifted' else 0.0
+    gridC = flame.grid + shift
+    # Merge Cantera's grid into the uniform one rather than resampling onto
+    # the uniform grid alone: Cantera's cells near the burner are a few um
+    # wide, and a uniform 200-point grid would smear out that gradient (and
+    # with it the burner heat loss). The uniform points keep dx <= gridMax
+    # downstream, where Cantera's grid is up to ~7.5 mm coarse; points closer
+    # than gridMin to their predecessor are dropped.
+    xAll = np.union1d(gridC[gridC < xRight],
+                      np.linspace(xLeft, xRight, nPoints))
+    x = [xAll[0]]
+    for xi in xAll[1:]:
+        if xi - x[-1] >= gridMin:
+            x.append(xi)
+    x[-1] = xRight
+    x = np.array(x)
+    # Upstream of a shifted profile: fresh reactants at Tu
+    gas.TPX = Tu, pressure, react
+    T0 = np.interp(x, gridC, flame.T, left=Tu)
+    Y0 = np.array([np.interp(x, gridC, flame.Y[k], left=gas.Y[k])
+                   for k in range(gas.n_species)]).T
+    Y0 = np.clip(Y0, 0.0, None)
+    Y0 /= Y0.sum(axis=1, keepdims=True)      # shape (nPoints, nSpecies)
+    # Ember takes the inlet stream (Tleft, Yleft) from the first point of the
+    # initial profile (FlameSolver::loadProfile). Cantera's x=0 value is the
+    # burner-face composition, already partly burned by back-diffusion
+    # (~25% of the H is in H2O there), so feeding it in as the inlet stream
+    # starves the flame of hydrogen. Put the actual reactants at x=0; the
+    # face relaxes to its flux balance within microseconds.
+    gas.TPX = Tu, pressure, react
+    T0[0] = Tu
+    Y0[0] = gas.Y
+else:
+    x_flame_guess = xLeft + 0.15 * (xRight - xLeft)
+    flameThickness_guess = 0.02 * (xRight - xLeft)
 
-x = np.linspace(xLeft, xRight, nPoints)
-s = 0.5 * (1 + np.tanh((x - x_flame_guess) / flameThickness_guess))
-T0 = Tu + (Tb - Tu) * s
-Y0 = np.outer(1 - s, Yu) + np.outer(s, Yb)   # shape (nPoints, nSpecies)
-V0 = np.full(nPoints, mdot)                  # constant mass flux (a=0 planar continuity)
-U0 = np.zeros(nPoints)                       # no strain -> no radial velocity gradient
+    gas.TPX = Tu, pressure, react
+    Yu = gas.Y.copy()
+    gas.equilibrate('HP')
+    Tb = gas.T
+    Yb = gas.Y.copy()
+    print(f"Adiabatic flame temperature: {Tb:.1f} K")
+
+    x = np.linspace(xLeft, xRight, nPoints)
+    s = 0.5 * (1 + np.tanh((x - x_flame_guess) / flameThickness_guess))
+    T0 = Tu + (Tb - Tu) * s
+    Y0 = np.outer(1 - s, Yu) + np.outer(s, Yb)   # shape (nPoints, nSpecies)
+
+V0 = np.full(len(x), mdot)                   # constant mass flux (a=0 planar continuity)
+U0 = np.zeros(len(x))                        # no strain -> no radial velocity gradient
+
+tStart = 0.0
+firstFileNumber = 0
+if restart:
+    restartFile = output + '/profNow.h5'
+    prof = utils.load(restartFile)
+    tStart = float(prof.t)
+    # Next number after the files actually present (profNow's own fileNumber
+    # field can lag behind the last numbered file)
+    firstFileNumber = 1 + max(int(os.path.basename(f)[4:10])
+                              for f in glob.glob(output + '/prof[0-9]*.h5'))
+    print(f"Restarting from {restartFile}: t = {tStart:.4f} s, "
+          f"next file prof{firstFileNumber:06d}")
+    x = prof.x
+    T0 = prof.T.copy()
+    Y0 = prof.Y.T.copy()                     # file stores (nSpecies, nPoints)
+    V0 = prof.V
+    U0 = prof.U
+    gas.TPX = Tu, pressure, react
+    T0[0] = Tu
+    Y0[0] = gas.Y
 
 conf = Config(
     Paths(outputDir=output),
@@ -113,7 +190,7 @@ conf = Config(
             flameGeometry='planar',
             nThreads=1,
             chemistryIntegrator='cvode',
-            splittingMethod='strang',
+            splittingMethod='balanced',
             continuityBC='fixedLeft',
             unburnedLeft=True,
             fixedBurnedVal=False,
@@ -128,7 +205,7 @@ conf = Config(
     InitialCondition(reactants=react,
                       pressure=pressure,
                       Tu=Tu,
-                      restartFile=restartFile,
+                      #restartFile=restartFile,
                       xLeft=xLeft,
                       xRight=xRight,
                       haveProfiles=True,
@@ -146,7 +223,7 @@ conf = Config(
         vtol=0.15,
         dvtol=0.25,
         gridMax=3e-4,
-        gridMin=1e-5,
+        gridMin=gridMin,
         addPointCount=2,
     ),
     CvodeTolerances(
@@ -167,8 +244,9 @@ conf = Config(
         # 'dTdt' checks whether the temperature FIELD itself is still
         # changing anywhere in space, which is what we actually care about.
         measurement='dTdt',
-        dTdtTol=0.6,        # tightened from default 10.0 [1/s]
-        tMin=0.02,          # let the initial-guess transient clear first
+        dTdtTol=1.0,        # tightened from default 10.0 [1/s]
+        tMin=0.025,          # let the initial-guess transient clear first; 0.02
+                            # stopped the tanh-start run mid-transient
         tEnd=0.2,           # generous headroom; previous run needed >0.012s
                             # and was still drifting steadily
     ),
@@ -179,17 +257,38 @@ conf = Config(
     # (which land between crashes and miss the actual divergence). Narrow
     # window bracketing the ~0.0044s crash time seen in the last run --
     # adjust once you know a new crash time.
-    OutputFiles(debugIntegratorStages=False),
+    Times(tStart=tStart),
+    OutputFiles(firstFileNumber=firstFileNumber,
+                debugIntegratorStages=False),
     Debug(startTime=0.0043, stopTime=0.0046),
 )
 
 if __name__ == '__main__':
+    if restart and os.path.exists(output + '/out.h5'):
+        # out.h5 only holds the current run's time series; keep the earlier part
+        os.replace(output + '/out.h5', output + f'/out_until_{tStart:.4f}s.h5')
     conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 
+    # For the non-default starts, compare against the converged 'cantera'
+    # ember run: independent starts must reach the same steady state
+    ref = None
+    if output != referenceOutput and os.path.exists(referenceOutput + '/profNow.h5'):
+        ref = utils.load(referenceOutput + '/profNow.h5')
+        xc = ref.x[ref.x <= min(ref.x[-1], struct.x[-1])]
+        dT = np.interp(xc, struct.x, struct.T) - np.interp(xc, ref.x, ref.T)
+        print(f"\nvs reference ({referenceOutput}): max |dT| = {abs(dT).max():.2f} K "
+              f"at x = {xc[abs(dT).argmax()]*1e3:.2f} mm")
+        for name in ('H2', 'H', 'OH', 'H2O'):
+            k = gas.species_index(name)
+            print(f"  {name:4} at burner face: {struct.Y[k, 0]:.4e} vs {ref.Y[k, 0]:.4e} "
+                  f"(rel. diff {struct.Y[k, 0]/ref.Y[k, 0] - 1:+.2e})")
+
     plt.figure()
     plt.plot(struct.x, struct.T, lw=2, label='Ember')
+    if ref is not None:
+        plt.plot(ref.x, ref.T, ':', lw=2, label='Ember (Cantera start)')
     plt.plot(flame.grid, flame.T, '--', lw=2, label='Cantera BurnerFlame')
     plt.xlabel('Position [m]')
     plt.ylabel('Temperature [K]')
@@ -197,16 +296,28 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(output + '/FinalTemperature.png')
     plt.close()
+    
+    plt.figure()
+    plt.plot(struct.x, struct.V/struct.rho, lw=2, label='Ember')
+    plt.plot(flame.grid, flame.velocity, '--', lw=2, label='Cantera BurnerFlame')
+    plt.xlabel('Position [m]')
+    plt.ylabel('Velocity [m/s]')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output + '/FinalVelocity.png')
+    plt.close()
 
     # --- Species comparison: ember vs the Cantera BurnerFlame reference ---
     # One panel per species since the scales differ by orders of magnitude
     # (FE is a trace species from the 500 ppm FEC5O5; H2O/O2/H2 are majors).
     # Both solutions use the same mechanism, so species indices match.
-    speciesPlot = ['H2O', 'FE', 'OH', 'H2', 'O2', 'H']
-    fig, axes = plt.subplots(2, 3, figsize=(14, 7), sharex=True)
+    speciesPlot = ['H2', 'O2', 'AR', 'H', 'O', 'H2O', 'FE', 'OH']
+    fig, axes = plt.subplots(2, 4, figsize=(17, 7), sharex=True)
     for ax, name in zip(axes.flat, speciesPlot):
         k = gas.species_index(name)
         ax.plot(struct.x, struct.Y[k, :], lw=2, label='Ember')
+        if ref is not None:
+            ax.plot(ref.x, ref.Y[k, :], ':', lw=2, label='Ember (Cantera start)')
         ax.plot(flame.grid, flame.Y[k, :], '--', lw=2, label='Cantera')
         ax.set_title(name)
         ax.set_ylabel('Mass fraction')
