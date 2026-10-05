@@ -3,18 +3,15 @@
 Burner-stabilized flame in ember: single premixed inlet at a prescribed mass
 flux (no opposing stream), unstrained (a=0), free/adiabatic outlet.
 
-Ember's initial guess is a crude, smooth tanh ramp from unburned to
-equilibrium -- deliberately NOT the fully converged Cantera BurnerFlame
-solution (solved separately below, purely as a reference to validate
-against). Ember integrates the transient PDE via Strang-split sub-stepping
-(convection/diffusion/production evaluated as separate, sequentially-coupled
-sub-steps, unlike Cantera's fully-implicit steady Newton solve), so handing
-it an already-converged profile means its sharply-peaked, near-zero-balanced
-trace radicals (O, H, HO2, ...) get evaluated by a single operator alone for
-a sub-step, before any splitConst cross-term estimate even exists -- easily
-enough to drive them slightly negative. A crude ramp has nothing precariously
-balanced yet, so it can't undershoot through zero this way; ember is designed
-to develop the real balance over physical time.
+Gas-phase setup as in burnerFla_test.py, plus iron particle moments
+(nucleation from Fe clusters, coagulation).
+
+Ember's initial guess is the converged Cantera BurnerFlame solution (solved
+below, also used as the reference to compare against), which converges
+fastest. burnerFla_test.py checked that shifted and tanh starts reach the
+same steady state. The particle moments start from zero everywhere and build
+up from nucleation; the Cantera gas profile has no particle sink for the Fe
+clusters, so the gas phase relaxes a little as the particles form.
 
 Because ember's automatic profile generator ties the fixed-left mass flux to
 the strain rate (u = a*z potential-flow relation), it has no formula for V
@@ -30,11 +27,11 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_particles'
+output = 'run/burnerFla_particles_corrMech'
 
 
 # Same reactant composition as single_Igor_nucl.py
-X_FEC5O5 = 0.0005
+X_FEC5O5 = 0.0003
 VS_total = 400 + 400 + 600
 VS_total /= (1 - X_FEC5O5)
 X_H2 = 400 / VS_total
@@ -44,13 +41,15 @@ react = f"H2:{X_H2:.8e}, AR:{X_AR:.8e}, FEC5O5:{X_FEC5O5:.8e}, O2:{X_O2:.8e}"
 print("Reactants:", react)
 
 #mechanism = 'Iron_elte_Syngas-newTransp.yaml'
-mechanism = 'opt-compact-mech-OF2.yaml'
+mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
+#mechanism = 'opt-compact-mech-OF2.yaml'
 pressure = 3000.0
 Tu = 300.0
 u_in = 1.1
 xLeft = 0.0
 xRight = 0.1
 nPoints = 200
+gridMin = 1e-5
 
 # --- Reference solution: Cantera BurnerFlame, same mechanism/composition ---
 gas = ct.Solution(mechanism)
@@ -59,7 +58,8 @@ rho_u = gas.density
 mdot = rho_u * u_in
 print(f"rho_u = {rho_u:.6f} kg/m3 -> fixed V (mass flux) = {mdot:.6e} kg/m2/s")
 
-flame = ct.BurnerFlame(gas, width=xRight)
+# Wider than ember's domain so the initial profile never needs extrapolating
+flame = ct.BurnerFlame(gas, width=xRight+0.02)
 flame.burner.mdot = mdot
 flame.transport_model = 'mixture-averaged'
 flame.radiation_enabled = False
@@ -74,25 +74,37 @@ flame.solve(loglevel=1, refine_grid=True, auto=True)
 print(f"Cantera BurnerFlame: unburned velocity = {flame.velocity[0]:.4f} m/s "
       f"(u_in = {u_in} m/s), Tb = {flame.T[-1]:.1f} K")
 
-# --- Build ember's initial guess: a crude, smooth tanh ramp (see module
-# docstring for why this -- not the converged Cantera profile -- is what
-# gets handed to Ember) --------------------------------------------------
-x_flame_guess = xLeft + 0.15 * (xRight - xLeft)
-flameThickness_guess = 0.02 * (xRight - xLeft)
-
+# --- Build ember's initial guess from the Cantera solution -----------------
+# Merge Cantera's grid into the uniform one rather than resampling onto the
+# uniform grid alone: Cantera's cells near the burner are a few um wide, and
+# a uniform 200-point grid would smear out that gradient (and with it the
+# burner heat loss). The uniform points keep dx <= gridMax downstream, where
+# Cantera's grid is coarse; points closer than gridMin to their predecessor
+# are dropped.
+xAll = np.union1d(flame.grid[flame.grid < xRight],
+                  np.linspace(xLeft, xRight, nPoints))
+x = [xAll[0]]
+for xi in xAll[1:]:
+    if xi - x[-1] >= gridMin:
+        x.append(xi)
+x[-1] = xRight
+x = np.array(x)
+T0 = np.interp(x, flame.grid, flame.T)
+Y0 = np.array([np.interp(x, flame.grid, flame.Y[k])
+               for k in range(gas.n_species)]).T
+Y0 = np.clip(Y0, 0.0, None)
+Y0 /= Y0.sum(axis=1, keepdims=True)          # shape (nPoints, nSpecies)
+# Ember takes the inlet stream (Tleft, Yleft) from the first point of the
+# initial profile (FlameSolver::loadProfile). Cantera's x=0 value is the
+# burner-face composition, already partly burned by back-diffusion (~25% of
+# the H is in H2O there), so feeding it in as the inlet stream starves the
+# flame of hydrogen. Put the actual reactants at x=0; the face relaxes to its
+# flux balance within microseconds.
 gas.TPX = Tu, pressure, react
-Yu = gas.Y.copy()
-gas.equilibrate('HP')
-Tb = gas.T
-Yb = gas.Y.copy()
-print(f"Adiabatic flame temperature: {Tb:.1f} K")
-
-x = np.linspace(xLeft, xRight, nPoints)
-s = 0.5 * (1 + np.tanh((x - x_flame_guess) / flameThickness_guess))
-T0 = Tu + (Tb - Tu) * s
-Y0 = np.outer(1 - s, Yu) + np.outer(s, Yb)   # shape (nPoints, nSpecies)
-V0 = np.full(nPoints, mdot)                  # constant mass flux (a=0 planar continuity)
-U0 = np.zeros(nPoints)                       # no strain -> no radial velocity gradient
+T0[0] = Tu
+Y0[0] = gas.Y
+V0 = np.full(len(x), mdot)                   # constant mass flux (a=0 planar continuity)
+U0 = np.zeros(len(x))                        # no strain -> no radial velocity gradient
 
 # Collisional nucleation: the mechanism only tracks gas-phase Fe clusters up
 # to FE7 (FE, FE2, ..., FE7); any collision whose combined size reaches FE8
@@ -116,7 +128,9 @@ conf = Config(
             flameGeometry='planar',
             nThreads=1,
             chemistryIntegrator='cvode',
-            splittingMethod='strang',
+            # Strang leaves the cross terms out of drhodt, which leaks mass
+            # at the burner (V ~ +7.6%); balanced splitting doesn't
+            splittingMethod='balanced',
             continuityBC='fixedLeft',
             unburnedLeft=True,
             fixedBurnedVal=False,
@@ -148,7 +162,7 @@ conf = Config(
         vtol=0.15,
         dvtol=0.25,
         gridMax=3e-4,
-        gridMin=1e-5,
+        gridMin=gridMin,
         addPointCount=2,
     ),
     CvodeTolerances(
@@ -173,8 +187,8 @@ conf = Config(
         # 'dTdt' checks whether the temperature FIELD itself is still
         # changing anywhere in space -- validated in burnerFla_test.py.
         measurement='dTdt',
-        dTdtTol=0.6,        # tightened from default 10.0 [1/s]
-        tMin=0.02,          # let the initial-guess transient clear first
+        dTdtTol=1.0,        # tightened from default 10.0 [1/s], as burnerFla_test.py
+        tMin=0.02,         # let the start-up transient clear first, as burnerFla_test.py
         tEnd=0.2,           # generous headroom
     ),
     Particles(
@@ -256,4 +270,68 @@ if __name__ == '__main__':
     fig.suptitle('Ember vs Cantera BurnerFlame: species (log scale)')
     fig.tight_layout()
     fig.savefig(output + '/Species_comparison_log.png')
+    plt.close(fig)
+
+    # --- Fe clusters: the only intended difference from Cantera is the Fe that
+    # nucleation moves from the gas phase into the particle moments. The last
+    # panel is the total Fe (element) mass fraction left in the gas phase;
+    # Cantera has no particle sink, so the gap between the curves is the Fe in
+    # particles.
+    def gasFe(Y):
+        kFe = gas.element_index('Fe')
+        WFe = gas.atomic_weights[kFe]
+        nFe = np.array([gas.n_atoms(k, kFe) for k in range(gas.n_species)])
+        return (nFe * WFe / gas.molecular_weights) @ Y
+
+    fig, axes = plt.subplots(2, 4, figsize=(17, 7), sharex=True)
+    for ax, name in zip(axes.flat, clusterSpecies):
+        k = gas.species_index(name)
+        ax.plot(struct.x, struct.Y[k, :], lw=2, label='Ember')
+        ax.plot(flame.grid, flame.Y[k, :], '--', lw=2, label='Cantera')
+        ax.set_title(name)
+        ax.set_ylabel('Mass fraction')
+        ax.axhline(0, color='k', lw=0.5)
+        ax.legend(loc='best', fontsize=8)
+    ax = axes.flat[len(clusterSpecies)]
+    ax.plot(struct.x, gasFe(struct.Y), lw=2, label='Ember')
+    ax.plot(flame.grid, gasFe(flame.Y), '--', lw=2, label='Cantera')
+    ax.set_title('Total Fe in gas phase (element)')
+    ax.set_ylabel('Mass fraction')
+    ax.legend(loc='best', fontsize=8)
+    for ax in axes[-1, :]:
+        ax.set_xlabel('Position [m]')
+    fig.suptitle('Ember vs Cantera BurnerFlame: Fe clusters')
+    fig.tight_layout()
+    fig.savefig(output + '/FeClusters_comparison.png')
+    plt.close(fig)
+
+    # --- Overview: T, particle fields and mole fractions of the Fe-O-H and
+    # radical species. Cantera has no particle phase, so N, V and d_p are
+    # ember only. moments[1] is particle volume per mass of gas [m3/kg], so
+    # rho*moments[1] is the particle volume fraction.
+    Xember = struct.Y / gas.molecular_weights[:, None]
+    Xember /= Xember.sum(axis=0)
+    fields = [
+        ('T', 'T [K]', struct.T, flame.T),
+        ('N', 'N [1/m³]', struct.numberDensity, None),
+        ('V', 'Particle volume fraction [-]', struct.rho * struct.moments[1], None),
+        ('d_p', 'd_p [nm]', struct.particleDiameter * 1e9, None),
+    ]
+    for name in ('FE', 'FEO', 'FEO2', 'FEOH', 'FEO2H2', 'O', 'H', 'OH'):
+        k = gas.species_index(name)
+        fields.append((f'x_{name}', 'Mole fraction', Xember[k], flame.X[k]))
+
+    fig, axes = plt.subplots(3, 4, figsize=(18, 10), sharex=True)
+    for ax, (title, ylabel, yE, yC) in zip(axes.flat, fields):
+        ax.plot(struct.x, yE, lw=2, label='Ember')
+        if yC is not None:
+            ax.plot(flame.grid, yC, '--', lw=2, label='Cantera')
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.legend(loc='best', fontsize=8)
+    for ax in axes[-1, :]:
+        ax.set_xlabel('Position [m]')
+    fig.suptitle('Ember (with particles) vs Cantera BurnerFlame')
+    fig.tight_layout()
+    fig.savefig(output + '/Particles_overview.png')
     plt.close(fig)
