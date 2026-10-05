@@ -190,10 +190,12 @@ void FlameSolver::prepareIntegrators()
         }
 
         // Diffusion solvers: Particle moments (passive scalars)
+        // particleDiffusivity is a plain diffusivity [m^2/s]; like rhoD for
+        // the species, the solver needs rho*D [kg/m*s] with B = 1/rho.
         for (size_t m=0; m<nMoments; m++) {
             DiffusionSystem& sys = diffusionTerms[kMoments+m];
             sys.B = rho.inverse();
-            sys.D = particleDiffusivity;
+            sys.D = rho * particleDiffusivity;
         }
     } else {
         // Diffusion solvers: Energy and momentum
@@ -215,7 +217,7 @@ void FlameSolver::prepareIntegrators()
         // Diffusion solvers: Particle moments (passive scalars)
         for (size_t m=0; m<nMoments; m++) {
             DiffusionSystem& sys = diffusionTerms[kMoments+m];
-            sys.D = particleDiffusivity;
+            sys.D = rho * particleDiffusivity;
             for (size_t j = 0; j <= jj; j++) {
                 sys.B[j] = 1 / (rho[j] * vzInterp->get(x[j], tNow));
             }
