@@ -132,6 +132,10 @@ cdef extern from "readConfig.h":
         vector[double] surfA, surfTa
         vector[int] surfDeltaM, surfDeltaO
 
+        vector[int] condSpecies
+        vector[double] condDiameter
+        vector[int] condDeltaM, condDeltaO
+
         vector[int] nucPrecursorSpecies
         vector[int] nucPrecursorAtomCount
         int nucMonomerIndex

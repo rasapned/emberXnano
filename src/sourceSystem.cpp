@@ -322,6 +322,59 @@ void SourceSystem::computeSurfaceReactionRates
     }
 }
 
+void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& speciesD)
+{
+    size_t nCond = options->condSpecies.size();
+    if (nCond == 0 || nMoments < 2) {
+        return;
+    }
+
+    double N = moments[kN]; // [kmol particles / kg gas]
+    double mM = moments[kM]; // [kg particle-phase metal / kg gas]
+    double mO = (nMoments > kO) ? moments[kO] : 0.0; // [kg particle-phase O / kg gas]
+
+    double vParticle = particleVolumeFromMoments(N, mM, mO, *options);
+    if (!(vParticle > 0)) {
+        return; // no particles present -- nothing to condense on
+    }
+    const double NA_ = Cantera::Avogadro;
+    double dp = particleDiameterFromVolume(vParticle); // [m]
+    double mp = (mM + std::max(mO, 0.0)) / (N * NA_); // single-particle mass [kg]
+    double nParticles = N * rho * NA_; // [particles / m^3]
+
+    // Same gradual cap as for surface reactions: species richer in O than the
+    // most oxidized phase stop condensing as the particle approaches it.
+    double xO = particleOxygenRatio(mM, mO, *options);
+    double xMax = options->phaseRatio.back();
+    double capFactor = (xMax > 0) ? std::max(1.0 - xO / xMax, 0.0) : 0.0;
+
+    for (size_t c = 0; c < nCond; c++) {
+        size_t k = options->condSpecies[c];
+        int dM = options->condDeltaM[c];
+        int dO = options->condDeltaO[c];
+
+        // Hard-sphere collision rate between molecules of k and particles
+        double mk = W[k] / NA_; // molecular mass [kg]
+        double mu = mk * mp / (mk + mp); // reduced mass [kg]
+        double dkp = dp + options->condDiameter[c];
+        double beta = 0.25 * M_PI * dkp * dkp *
+                      sqrt(8.0 * Cantera::Boltzmann * T / (M_PI * mu)); // [m^3/s]
+
+        double conc = Y[k] * rho / W[k]; // [kmol/m^3]
+        double R = std::max(beta * nParticles * conc, 0.0); // [kmol/m^3/s]
+        if (dO > xMax * dM) {
+            R *= capFactor;
+        }
+
+        // By construction W[k] == dM*WM + dO*WO, so mass is conserved.
+        momentsQ[kM] += dM * options->metalWeight * R / rho;
+        if (dO != 0) {
+            momentsQ[kO] += dO * options->oxygenWeight * R / rho;
+        }
+        speciesD[k] += W[k] * R / rho;
+    }
+}
+
 void SourceSystem::setTimers
 (PerfTimer* reactionRates, PerfTimer* thermo, PerfTimer* jacobian)
 {
@@ -428,6 +481,7 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
     dvec momentsQ, momentsD, speciesQ, speciesD;
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
+    computeCondensationRates(momentsQ, speciesD);
     computeCoagulationRates(momentsD);
     dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
     dYdt += speciesQ - speciesD;
@@ -774,6 +828,7 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
     dvec momentsQ, momentsD, speciesQ, speciesD;
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
+    computeCondensationRates(momentsQ, speciesD);
     computeCoagulationRates(momentsD);
     dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);
     dMomentsdtD = momentsD;

@@ -5,10 +5,10 @@ flux (no opposing stream), unstrained (a=0), free/adiabatic outlet.
 
 Gas-phase setup as in burnerFla_test.py, plus iron particle moments
 (nucleation from Fe clusters, coagulation) -- as burnerFla_particles.py, but
-with particle-phase oxygen (nMoments=3) and the gas-particle surface reactions
-of the OpenFOAM model (oxidation by O2/O/H2O, reduction by H2/H, etching by
-OH; see surfaceReactions below), plus heterogeneous condensation of Fe, the Fe
-clusters and FeO onto the particles at the kinetic collision rate.
+with particle-phase oxygen (nMoments=3) and heterogeneous condensation of Fe,
+the Fe clusters and FeO onto the particles at the kinetic collision rate. No
+gas-particle surface reactions (compare burnerFla_particles_oxid.py, which
+adds them): particle oxygen comes from FeO condensation only.
 
 Ember's initial guess is the converged Cantera BurnerFlame solution (solved
 below, also used as the reference to compare against), which converges
@@ -31,7 +31,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_particles_oxid'
+output = 'run/burnerFla_particles_cond'
 
 
 # Same reactant composition as single_Igor_nucl.py
@@ -124,40 +124,6 @@ for i in range(1, maxClusterSize + 1):
 print("Nucleation channels:",
       list(zip(collisionSpeciesA, collisionSpeciesB)))
 
-# --- Surface reactions, translated from the OpenFOAM setup ------------------
-# OpenFOAM: (impinging species, gas product, particle species changed) with
-# (pre-exponential factor, activation energy). Conversion to ember:
-#  - A: OpenFOAM's factor carries Avogadro's number per mol (rate counted in
-#    molecules, amounts in mol), so A_ember [m/s] = |A_OF| / N_A * 1000, with
-#    Cantera's N_A per kmol. The sign
-#    of A_OF (+ adds to, - removes from the particle) is not an input in ember
-#    -- it follows from reactant/product compositions -- but is checked below.
-#  - Ea [J/mol] -> activation temperature Ta = Ea / R, R = 8.314 J/mol/K.
-#  - (O AR O): AR is OpenFOAM's placeholder for "no gas product" (the O atom
-#    stays on the particle), i.e. product=None here.
-R_JmolK = 8.314
-openfoamReactions = [
-    # reactant, product, A_OF,     Ea [J/mol]
-    ('O2',  'O',    2.324e26,  8.314e3),   # oxidation
-    ('O',   None,   2.629e26,  0.000),     # oxidation (OpenFOAM product: AR)
-    ('H2O', 'H2',   2.714e26,  1.081e4),   # oxidation
-    ('H2',  'H2O', -8.040e26,  1.663e4),   # reduction
-    ('H',   'OH',  -1.079e27,  4.157e3),   # reduction
-    ('OH',  'FEOH', -2.568e27, 1.829e4),   # etching (removes Fe)
-]
-surfaceReactions = []
-for reactant, product, A_OF, Ea in openfoamReactions:
-    reaction = SurfaceReaction(reactant=reactant, product=product,
-                               A=abs(A_OF) / ct.avogadro*1000, Ta=Ea / R_JmolK)
-    dM, dO = reaction.particleChange(gas, 'Fe')
-    if (dM + dO > 0) != (A_OF > 0):
-        raise ValueError("Surface reaction %s -> %s: sign of A (%g) does not"
-                         " match the particle change (dFe=%d, dO=%d)" %
-                         (reactant, product, A_OF, dM, dO))
-    surfaceReactions.append(reaction)
-    print("Surface reaction %-4s -> %-5s dFe=%+d dO=%+d  A=%.4g m/s  Ta=%.1f K" %
-          (reactant, product, dM, dO, reaction.A.value, reaction.Ta.value))
-
 conf = Config(
     Paths(outputDir=output),
     Chemistry(mechanismFile=mechanism,
@@ -240,7 +206,6 @@ conf = Config(
             collisionSpeciesB=collisionSpeciesB,
         ),
         coagulation=True,
-        surfaceReactions=surfaceReactions,
         condensationSpecies=clusterSpecies + ['FEO'],
     ),
 )

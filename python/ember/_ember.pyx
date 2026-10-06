@@ -364,6 +364,31 @@ cdef class ConfigOptions:
         opts.surfDeltaM = surfDeltaM
         opts.surfDeltaO = surfDeltaO
 
+        condSpecies, condDiameter = [], []
+        condDeltaM, condDeltaO = [], []
+        for name in self.particles.condensationSpecies:
+            composition = self.gas.species(name).composition
+            dM = int(composition.get(metal, 0))
+            dO = int(composition.get('O', 0))
+            if set(composition) - {metal, 'O'} or dM == 0:
+                raise ValueError(
+                    "Particles.condensationSpecies: '%s' must contain the"
+                    " particle metal '%s' and otherwise only O; found %r." %
+                    (name, metal, composition))
+            if dO != 0 and self.particles.nMoments < 3:
+                raise ValueError(
+                    "Particles.condensationSpecies: '%s' contains oxygen,"
+                    " which requires nMoments = 3." % name)
+            k, d, _ = _speciesCollisionProperties(self.gas, name)
+            condSpecies.append(k)
+            condDiameter.append(d)
+            condDeltaM.append(dM)
+            condDeltaO.append(dO)
+        opts.condSpecies = condSpecies
+        opts.condDiameter = condDiameter
+        opts.condDeltaM = condDeltaM
+        opts.condDeltaO = condDeltaO
+
         nucleation = self.particles.nucleation
         if nucleation is not None:
             nucleation.validate(self.gas, metal)

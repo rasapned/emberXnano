@@ -279,6 +279,15 @@ public:
     std::vector<double> surfA, surfTa;
     std::vector<int> surfDeltaM, surfDeltaO;
 
+    //! Heterogeneous condensation (parallel arrays, one entry per condensing
+    //! gas species): species condSpecies[k] (collision diameter
+    //! condDiameter[k] [m], containing condDeltaM[k] metal and condDeltaO[k]
+    //! O atoms) is added to the particles at the kinetic (hard-sphere,
+    //! free-molecular) gas-particle collision rate.
+    std::vector<int> condSpecies;
+    std::vector<double> condDiameter;
+    std::vector<int> condDeltaM, condDeltaO;
+
     //! Classical nucleation theory (CNT), for a single monomer material
     //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in
     //! nucPrecursorSpecies, with nucPrecursorAtomCount giving the number of

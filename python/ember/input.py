@@ -623,6 +623,18 @@ class Particles(Options):
     #: the particle's O content require ``nMoments`` == 3.
     surfaceReactions = Option([])
 
+    #: Gas species that condense heterogeneously onto existing particles
+    #: (e.g. metal atoms, metal clusters and metal oxides such as ``FE``,
+    #: ``FE2``, ``FEO``). Each must contain the particle metal and otherwise
+    #: only O; the whole molecule is added to the particle at the kinetic
+    #: (hard-sphere, free-molecular) gas-particle collision rate,
+    #: ``pi/4 (d_p + d_k)^2 sqrt(8 kT / (pi mu)) n_p C_k``, with the
+    #: collision diameter d_k from the mechanism's transport data and
+    #: sticking probability 1. Species richer in O than the most oxidized
+    #: phase are subject to the same gradual cap as surface reactions.
+    #: Oxygen-containing species require ``nMoments`` == 3.
+    condensationSpecies = Option([])
+
     #: Particle diameter [m] below which mass-removing surface reactions
     #: also remove particles (disintegration): N then decreases in
     #: proportion to the removed mass, keeping the particle size fixed.

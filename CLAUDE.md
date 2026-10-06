@@ -168,6 +168,11 @@ species), so they are **mass-specific** quantities, not raw densities:
   the particle change (Δmetal, ΔO) is derived from reactant − product
   composition. Below `minParticleDiameter` mass removal also removes
   particles from N (disintegration).
+- Heterogeneous condensation (`Particles.condensationSpecies`,
+  `computeCondensationRates()` in `sourceSystem.cpp`): whole gas molecules
+  (metal, clusters, oxides) added to particles at the hard-sphere
+  gas-particle collision rate, collision diameters from the mechanism's
+  transport data, as for collision nucleation.
 - Cross terms (Soret/thermal-diffusion coupling) are explicitly zeroed for
   moments (`flameSolver.cpp`, `updateCrossTerms`) — only plain Fickian
   diffusion applies.

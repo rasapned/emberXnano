@@ -73,6 +73,13 @@ public:
     void computeSurfaceReactionRates(dvec& momentsQ, dvec& momentsD,
                                      dvec& speciesQ, dvec& speciesD);
 
+    //! Add the heterogeneous condensation rates (see `options->condSpecies`
+    //! etc.) to the production terms of the mM/mO moments and destruction
+    //! terms of the condensing gas species: kinetic (hard-sphere,
+    //! free-molecular) collisions of gas molecules with particles, sticking
+    //! probability 1. N is unchanged; mass is conserved exactly.
+    void computeCondensationRates(dvec& momentsQ, dvec& speciesD);
+
     //! Add the Brownian coagulation sink to `momentsD[kN]` at the current
     //! state (T, moments, rho). Coagulation reduces particle number (N) but
     //! conserves particle-phase mass (mM, mO), so only kN is affected. Shared
