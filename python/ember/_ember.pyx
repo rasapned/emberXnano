@@ -319,28 +319,58 @@ cdef class ConfigOptions:
         opts.momentBCLeft = self.particles.momentBCLeft
         opts.momentBCRight = self.particles.momentBCRight
 
-        # Particle nucleation source terms (two-way coupled with the gas phase)
-        particleDensity = self.particles.particleDensity
-        if self.particles.particlePhaseName:
-            try:
-                particlePhase = cantera.Solution(self.chemistry.mechanismFile,
-                                                 self.particles.particlePhaseName)
-                particleDensity = particlePhase.density
-            except Exception as e:
-                print("Warning: could not find particle phase '%s' in '%s' (%s)."
-                      " Falling back to particles.particleDensity = %g kg/m^3." %
-                      (self.particles.particlePhaseName, self.chemistry.mechanismFile,
-                       e, particleDensity))
-        opts.particleDensity = particleDensity
+        # Particle material: metal + oxygen, densities of its phases
+        metal = self.particles.metal
+        if self.particles.nMoments > 0 and metal not in self.gas.element_names:
+            raise ValueError("particles.metal: element '%s' is not in the"
+                             " mechanism." % metal)
+        phases = [(float(x), float(rho)) for x, rho in self.particles.phases]
+        if (not phases or phases[0][0] != 0.0 or
+                any(b[0] <= a[0] for a, b in zip(phases, phases[1:])) or
+                any(rho <= 0 for _, rho in phases)):
+            raise ValueError("particles.phases must be (O/metal ratio, density)"
+                             " pairs with ascending ratios starting at 0 (pure"
+                             " metal) and positive densities; got %r." % (phases,))
+        opts.phaseRatio = [x for x, _ in phases]
+        opts.phaseDensity = [rho for _, rho in phases]
+        opts.metalWeight = cantera.Element(metal).weight
+        opts.oxygenWeight = cantera.Element('O').weight
         opts.coagulation = self.particles.coagulation
+        opts.minParticleDiameter = self.particles.minParticleDiameter
+
+        surfReactant, surfProduct = [], []
+        surfA, surfTa = [], []
+        surfDeltaM, surfDeltaO = [], []
+        for reaction in self.particles.surfaceReactions:
+            dM, dO = reaction.particleChange(self.gas, metal)
+            if dO != 0 and self.particles.nMoments < 3:
+                raise ValueError(
+                    "Particles.surfaceReactions: '%s -> %s' changes the"
+                    " particle's oxygen content, which requires nMoments = 3."
+                    % (reaction.reactant.value, reaction.product.value))
+            surfReactant.append(self.gas.species_index(reaction.reactant.value))
+            if reaction.product.value is None:
+                surfProduct.append(-1)
+            else:
+                surfProduct.append(self.gas.species_index(reaction.product.value))
+            surfA.append(reaction.A.value)
+            surfTa.append(reaction.Ta.value)
+            surfDeltaM.append(dM)
+            surfDeltaO.append(dO)
+        opts.surfReactant = surfReactant
+        opts.surfProduct = surfProduct
+        opts.surfA = surfA
+        opts.surfTa = surfTa
+        opts.surfDeltaM = surfDeltaM
+        opts.surfDeltaO = surfDeltaO
 
         nucleation = self.particles.nucleation
         if nucleation is not None:
-            nucleation.validate(self.gas)
+            nucleation.validate(self.gas, metal)
 
             nucSpeciesA, nucSpeciesB = [], []
             nucStoichA, nucStoichB = [], []
-            nucVolumePerEvent = []
+            nucMassPerEvent = []
             nucCollisionPrefactor = []
             stoichA = nucleation.stoichA.value
             stoichB = nucleation.stoichB.value
@@ -365,14 +395,14 @@ cdef class ConfigOptions:
                 nucStoichB.append(stoichB)
                 nucCollisionPrefactor.append(prefactor)
                 # Always derived, never user-specified: this is what preserves
-                # the exact invariant sum(Y) + particleDensity*V == 1.
-                nucVolumePerEvent.append((stoichA * WA + stoichB * WB) / particleDensity)
+                # the exact invariant sum(Y) + mM + mO == 1.
+                nucMassPerEvent.append(stoichA * WA + stoichB * WB)
 
             opts.nucSpeciesA = nucSpeciesA
             opts.nucSpeciesB = nucSpeciesB
             opts.nucStoichA = nucStoichA
             opts.nucStoichB = nucStoichB
-            opts.nucVolumePerEvent = nucVolumePerEvent
+            opts.nucMassPerEvent = nucMassPerEvent
             opts.nucCollisionPrefactor = nucCollisionPrefactor
 
             nucPrecursorSpecies = []
@@ -730,9 +760,26 @@ cdef class FlameSolver:
             return getArray_Vec(self.solver.rho)
 
     property particleDiameter:
-        """Mean single-particle diameter [m] implied by the N, V moments."""
+        """Mean single-particle diameter [m] implied by the N, mM, mO moments."""
         def __get__(self):
             return getArray_Vec(self.solver.particleDiameter)
+
+    property particleOxygenRatio:
+        """
+        Particle-phase O/metal atomic ratio, from the mM (``moments[1]``) and
+        mO (``moments[2]``) moments. 0 where no metal is present, or for
+        pure-metal particles (``nMoments`` < 3).
+        """
+        def __get__(self):
+            if self.nMoments < 2:
+                raise AttributeError(
+                    "particleOxygenRatio is unavailable: particles.nMoments < 2")
+            mM = self.moments[1, :]
+            if self.nMoments < 3:
+                return np.zeros_like(mM)
+            nM = mM / self.options.opts.metalWeight
+            nO = self.moments[2, :] / self.options.opts.oxygenWeight
+            return np.where(mM > 0, nO / np.where(mM > 0, nM, 1.0), 0.0)
 
     property particleDiffusivity:
         """Particle Brownian diffusivity [m^2/s] (Stokes-Einstein-Cunningham)."""

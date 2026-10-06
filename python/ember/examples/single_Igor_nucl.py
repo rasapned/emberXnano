@@ -98,7 +98,7 @@ conf = Config(
     Particles(
         nMoments=2,
         momentBCLeft=0.0,
-        particleDensity=7874.0,
+        metal='Fe',
         nucleation=NucleationChannel(
             collisionSpeciesA=collisionSpeciesA,
             collisionSpeciesB=collisionSpeciesB,
@@ -123,7 +123,7 @@ if __name__ == '__main__':
     fig, ax1 = plt.subplots()
     ax2 = ax1.twinx()
     ax1.plot(struct.x, struct.numberDensity, 'b-', label='Number of particles')
-    ax2.plot(struct.x, struct.moments[1,:], 'r-', label='Particle diameter')
+    ax2.plot(struct.x, struct.particleDiameter, 'r-', label='Particle diameter')
     ax1.set_xlabel('Position [m]')
     ax1.set_ylabel('Particle number density / m⁻³', color='b')
     ax2.set_ylabel('Particle diameter / m', color='r')

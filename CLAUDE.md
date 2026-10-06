@@ -130,12 +130,15 @@ Run these from the repo root (not from `python/`).
 - `test/` — C++ (`test_*.cpp`) and Python (`test/python`) test suites, run via
   `scons test`.
 
-## Particle moments module (nucleation / passive-scalar transport)
+## Particle moments module (nucleation / surface reactions / transport)
 
 Extra scalar fields transported alongside `T`, `U`, `Y` — rows
-`kMoments = nSpec+2` .. `kMoments+nMoments-1` of `state`. Two moments are
-currently used: `kN` (number, index 0) and `kV` (volume, index 1),
-`src/readConfig.h`.
+`kMoments = nSpec+2` .. `kMoments+nMoments-1` of `state`. Up to three
+moments (`src/readConfig.h`): `kN` (number, index 0), `kM` (particle-phase
+metal mass, index 1) and `kO` (particle-phase O mass, index 2; only with
+`nMoments = 3`, otherwise particles are pure metal). The metal is set per
+case (`Particles.metal`, an element name of the mechanism, e.g. `'Fe'`);
+nothing in the code is specific to iron — only the defaults are.
 
 **Unit convention — easy to get wrong:** moments are transported exactly like
 mass fractions (`B = 1/ρ` in diffusion, same convection-solver treatment as a
@@ -149,21 +152,34 @@ species), so they are **mass-specific** quantities, not raw densities:
   value is 1000× off. This conversion is done at the Python interface layer
   (`FlameSolver.numberDensity` property in `_ember.pyx`), not inside the
   transport equations.
-- `kV` = m³ of particle volume **per kg of gas**, deliberately built so that
-  `particleDensity · V` equals the particle-phase mass fraction, preserving
-  the invariant `sum(Y) + particleDensity·V == 1`. Never multiply this by
-  Avogadro's number.
+- `kM`, `kO` = kg of particle-phase metal / O **per kg of gas**. All source
+  terms (nucleation, surface reactions) are built from species molecular
+  weights so they conserve mass exactly between gas and particles
+  (`sum(Y) + mM + mO` is invariant under the source terms). Never multiply
+  these by Avogadro's number.
+- Particle **size** is derived, not transported: mass per particle
+  `(mM+mO)/(N·Nₐ)` divided by a density interpolated linearly in the
+  O/metal ratio between the case-defined `Particles.phases`
+  (`(ratio, density)` pairs from pure metal up to the most oxidized phase,
+  whose ratio is also the oxidation cap) — `src/particleUtils.cpp`.
+- Surface reactions (`SurfaceReaction` in `input.py`,
+  `computeSurfaceReactionRates()` in `sourceSystem.cpp`): Arrhenius rate ×
+  particle surface area × reactant concentration × available-site fraction;
+  the particle change (Δmetal, ΔO) is derived from reactant − product
+  composition. Below `minParticleDiameter` mass removal also removes
+  particles from N (disintegration).
 - Cross terms (Soret/thermal-diffusion coupling) are explicitly zeroed for
   moments (`flameSolver.cpp`, `updateCrossTerms`) — only plain Fickian
   diffusion applies.
 - Particle diffusivity (`updateParticleDiffusivity()` in `flameSolver.cpp`) is
   computed per grid point from the local mean particle size
-  (`d_p` from `V/(N·Nₐ)`) via Stokes-Einstein with Cunningham slip correction,
-  falling back to the constant `options.momentDiffusivity` wherever `N` or
-  `V` ≤ 0 (no particles present yet). Because `D_p ∝ 1/d_p²` in the
-  free-molecular regime, this ratio is numerically sensitive where `N, V` are
-  both near zero (e.g. domain edges) — treat large diffusivities there with
-  suspicion; likely a `V/N` noise artifact rather than real physics.
+  (`d_p` from the size closure above) via Stokes-Einstein with Cunningham
+  slip correction, falling back to the constant `options.momentDiffusivity`
+  wherever `N` or `mM` ≤ 0 (no particles present yet). Because
+  `D_p ∝ 1/d_p²` in the free-molecular regime, this ratio is numerically
+  sensitive where `N, mM` are both near zero (e.g. domain edges) — treat
+  large diffusivities there with suspicion; likely a mass/`N` noise artifact
+  rather than real physics.
 
 ## Working conventions
 

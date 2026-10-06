@@ -11,11 +11,12 @@ const size_t kWmx = 2; // never used in the same systems as kSpecies
 
 // Particle moment indices, relative to the start of the moment block
 // (i.e. row kSpecies+nSpec in the full state vector). Fixed convention:
-// index 0 = N (particle number density), index 1 = V (particle volume
-// density). A third index (Vzeta, in-particle oxygen) is reserved for
-// later but not yet implemented.
+// index 0 = N (kmol particles / kg gas), index 1 = particle-phase metal mass
+// (kg / kg gas), index 2 = particle-phase O mass (kg / kg gas; only present
+// when nMoments >= 3, otherwise particles are pure metal).
 const size_t kN = 0;
-const size_t kV = 1;
+const size_t kM = 1;
+const size_t kO = 2;
 
 //! Possible boundary conditions for the continuity equations
 namespace ContinuityBoundaryCondition {
@@ -228,31 +229,55 @@ public:
     double momentBCLeft; //!< [particles.momentBCLeft] Fixed left boundary value
     double momentBCRight; //!< [particles.momentBCRight] Fixed right boundary value
     // Particle nucleation source terms (two-way coupled with the gas phase)
-    // [particles.particleDensity]
-    double particleDensity; //!< Bulk density of the particle material [kg/m^3]
+    //! [particles.phases] Particle material phases as parallel arrays of
+    //! O/metal atomic ratio (ascending, starting at 0 = pure metal) and bulk
+    //! density [kg/m^3]. The particle density is interpolated linearly in the
+    //! O/metal ratio between them (used only to convert particle mass into
+    //! particle size); the last ratio is the maximum oxidation state.
+    std::vector<double> phaseRatio, phaseDensity;
+
+    //! Atomic weights [kg/kmol] of the particle metal ([particles.metal])
+    //! and of oxygen.
+    double metalWeight, oxygenWeight;
 
     //! [particles.coagulation] Enable the Brownian coagulation sink for the
-    //! N moment (particle-particle collisions: N decreases, V unchanged).
+    //! N moment (particle-particle collisions: N decreases, mass unchanged).
     bool coagulation;
+
+    //! [particles.minParticleDiameter] Particle diameter [m] below which
+    //! mass-removing surface reactions also remove particles from N, in
+    //! proportion to the removed mass (particle disintegration).
+    double minParticleDiameter;
 
     //! Collision-based nucleation channels (parallel arrays, one entry per
     //! channel). Channel c consumes gas species nucSpeciesA[c] (stoichiometry
     //! nucStoichA[c]) and nucSpeciesB[c] (stoichiometry nucStoichB[c]; may
     //! equal speciesA for a homomolecular collision) to form
-    //! nucVolumePerEvent[c] [m^3] of new particle volume per nucleation
-    //! event. nucVolumePerEvent is ALWAYS derived (in Python) from the
-    //! consumed species' molecular weights and particleDensity so that
-    //! particleDensity * dV/dt equals the mass consumption rate identically
-    //! -- this is what makes sum(Y) + particleDensity*V == 1 an exact
-    //! invariant of the coupled ODE. nucCollisionPrefactor[c] is the
+    //! nucMassPerEvent[c] [kg/kmol of events] of new particle-phase metal.
+    //! nucMassPerEvent is ALWAYS derived (in Python) from the consumed
+    //! species' molecular weights so that the particle metal mass production
+    //! equals the gas mass consumption rate identically -- this is what
+    //! makes sum(Y) + mM + mO == 1 an exact invariant of the coupled ODE.
+    //! Only pure-metal species may nucleate. nucCollisionPrefactor[c] is the
     //! hard-sphere kinetic collision prefactor (diameter/reduced-mass terms,
     //! independent of local state) precomputed once in Python from the
     //! mechanism's transport data; only sqrt(T) and the concentrations need
     //! to be evaluated at each grid point/timestep.
     std::vector<int> nucSpeciesA, nucSpeciesB;
     std::vector<int> nucStoichA, nucStoichB;
-    std::vector<double> nucVolumePerEvent;
+    std::vector<double> nucMassPerEvent;
     std::vector<double> nucCollisionPrefactor;
+
+    //! Gas-particle surface reactions (parallel arrays, one entry per
+    //! reaction): gas species surfReactant[r] impinges on a particle and
+    //! leaves as surfProduct[r] (-1 = no gas product), changing the particle
+    //! by surfDeltaM[r] metal atoms and surfDeltaO[r] O atoms per event (both
+    //! derived in Python from the species compositions; positive = added to
+    //! the particle). Rate [kmol/m^3/s] = surfA * exp(-surfTa/T) * theta *
+    //! (particle surface area per m^3) * C_reactant, with surfA in [m/s].
+    std::vector<int> surfReactant, surfProduct;
+    std::vector<double> surfA, surfTa;
+    std::vector<int> surfDeltaM, surfDeltaO;
 
     //! Classical nucleation theory (CNT), for a single monomer material
     //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in
@@ -260,7 +285,7 @@ public:
     //! monomer units in each cluster (index nucMonomerIndex is the monomer
     //! itself, atom count == 1). The monomer mass/volume used by the CNT
     //! rate are derived at runtime from W[nucPrecursorSpecies[nucMonomerIndex]]
-    //! and particleDensity -- not a separate user input.
+    //! and the pure-metal density phaseDensity[0] -- not a separate user input.
     std::vector<int> nucPrecursorSpecies;
     std::vector<int> nucPrecursorAtomCount;
     int nucMonomerIndex;

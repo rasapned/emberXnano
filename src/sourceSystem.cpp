@@ -100,7 +100,7 @@ void SourceSystem::computeNucleationRates
 
         // Particle moments: pure production
         momentsQ[kN] += J / rho;
-        momentsQ[kV] += J / rho * options->nucVolumePerEvent[c];
+        momentsQ[kM] += J / rho * options->nucMassPerEvent[c];
 
         // Gas species consumption: pure destruction
         speciesD[kA] += options->nucStoichA[c] * J * W[kA] / rho;
@@ -141,11 +141,11 @@ void SourceSystem::computeNucleationRates
     }
 
     // Monomer mass/volume, derived from the mechanism (not user-specified),
-    // consistent with the collision channels' particleDensity convention.
+    // using the pure-metal phase density.
     size_t kMon = options->nucPrecursorSpecies[options->nucMonomerIndex];
     double n_mon = pMon / (kB_ * T); // monomer-equivalent number density [1/m^3]
     double m1 = W[kMon] / NA_; // monomer mass [kg] -- unrelated to M_PI
-    double v1 = W[kMon] / (NA_ * options->particleDensity); // monomer volume [m^3]
+    double v1 = W[kMon] / (NA_ * options->phaseDensity[0]); // monomer volume [m^3]
 
     // Surface tension and dimensionless surface energy parameter Theta,
     // referenced to a spherical monomer of volume v1.
@@ -163,26 +163,27 @@ void SourceSystem::computeNucleationRates
     J = std::max(J, 0.0);
 
     momentsQ[kN] += J / rho;
-    momentsQ[kV] += J * v1 * gStar / rho;
+    momentsQ[kM] += J * gStar * W[kMon] / rho;
     speciesD[kMon] += J * gStar * W[kMon] / rho;
 }
 
 void SourceSystem::computeCoagulationRates(dvec& momentsD)
 {
     if (nMoments < 2 || !options->coagulation) {
-        // Both N (kN) and V (kV) are required to define a particle size.
+        // Both N (kN) and mM (kM) are required to define a particle size.
         return;
     }
 
     double N = moments[kN]; // [kmol particles / kg gas]
-    double V = moments[kV]; // [m^3 particle volume / kg gas]
+    double mM = moments[kM]; // [kg particle-phase metal / kg gas]
+    double mO = (nMoments > kO) ? moments[kO] : 0.0; // [kg particle-phase O / kg gas]
 
-    double vParticle = particleVolumeFromMoments(N, V);
+    double vParticle = particleVolumeFromMoments(N, mM, mO, *options);
     if (!(vParticle > 0)) {
         return; // no particles present -- nothing to coagulate
     }
     double dc = particleDiameterFromVolume(vParticle); // [m]
-    double mp = vParticle * options->particleDensity; // single-particle mass [kg]
+    double mp = (mM + std::max(mO, 0.0)) / (N * Cantera::Avogadro); // single-particle mass [kg]
 
     double Wmx_ = gas->getMixtureMolecularWeight(); // [kg/kmol]
     double mu_ = gas->getViscosity(); // [Pa*s]
@@ -192,7 +193,7 @@ void SourceSystem::computeCoagulationRates(dvec& momentsD)
 
     // Monodisperse Brownian coagulation halves the physical number density
     // at rate dn/dt = -0.5*beta*n^2 (n = N*rho*Avogadro [particles/m^3]),
-    // while leaving the total particle volume (and hence V) unchanged --
+    // while leaving the total particle mass (mM, mO) unchanged --
     // particles merge, matter is conserved. Converting back to the
     // "kmol particles per kg gas" state-variable convention used for kN
     // (rho and one power of Avogadro cancel; see the unit note above):
@@ -205,6 +206,119 @@ void SourceSystem::computeCoagulationRates(dvec& momentsD)
             "mp=%.4e[kg] meanFreePath=%.4e[m] beta=%.4e[m^3/s] | "
             "dN/dt=-%.4e[kmol/kg/s]") %
             j % x % N % dc % mp % meanFreePath % beta % dNdt_coag);
+    }
+}
+
+void SourceSystem::computeSurfaceReactionRates
+(dvec& momentsQ, dvec& momentsD, dvec& speciesQ, dvec& speciesD)
+{
+    size_t nReactions = options->surfReactant.size();
+    if (nReactions == 0 || nMoments < 2) {
+        return;
+    }
+
+    double N = moments[kN]; // [kmol particles / kg gas]
+    double mM = moments[kM]; // [kg particle-phase metal / kg gas]
+    double mO = (nMoments > kO) ? moments[kO] : 0.0; // [kg particle-phase O / kg gas]
+
+    double vParticle = particleVolumeFromMoments(N, mM, mO, *options);
+    if (!(vParticle > 0)) {
+        return; // no particles present -- no surface to react on
+    }
+    double dp = particleDiameterFromVolume(vParticle); // [m]
+    double nParticles = N * rho * Cantera::Avogadro; // [particles / m^3]
+    double area = M_PI * dp * dp * nParticles; // particle surface area [m^2 / m^3]
+
+    // The surface composition is assumed equal to the particle composition:
+    // atomic fractions of metal and O sites, plus a gradual cap on oxidation
+    // that vanishes at the most oxidized phase (O/metal = xMax).
+    double xO = particleOxygenRatio(mM, mO, *options);
+    double XM = 1.0 / (1.0 + xO);
+    double XO = 1.0 - XM;
+    double xMax = options->phaseRatio.back();
+    double capFactor = (xMax > 0) ? std::max(1.0 - xO / xMax, 0.0) : 0.0;
+
+    const double WM = options->metalWeight;
+    const double WO = options->oxygenWeight;
+
+    double massLoss = 0.0; // particle mass removal rate [kg / kg gas / s]
+    for (size_t r = 0; r < nReactions; r++) {
+        int dM = options->surfDeltaM[r];
+        int dO = options->surfDeltaO[r];
+
+        // Fraction of the surface available to this reaction
+        double theta;
+        if (dM < 0) {
+            theta = XM; // etching: needs metal sites
+        } else if (dO < 0) {
+            theta = XO; // reduction: needs O sites
+        } else if (dM == 0) {
+            theta = XM; // oxidation: binds to metal sites
+        } else {
+            theta = 1.0; // condensation of metal-bearing species
+        }
+        // Gradual cap at the most oxidized phase for any reaction that would
+        // raise O/metal beyond xMax: adding material richer in O, or removing
+        // material richer in metal
+        bool raisesO = (dM > 0) ? (dO > xMax * dM)
+                     : (dM < 0) ? (-dO < -xMax * dM)
+                     : (dO > 0);
+        if (raisesO) {
+            theta *= capFactor;
+        }
+
+        size_t k = options->surfReactant[r];
+        double conc = Y[k] * rho / W[k]; // [kmol/m^3]
+        double R = options->surfA[r] * exp(-options->surfTa[r] / T) *
+                   theta * area * conc; // [kmol/m^3/s]
+        R = std::max(R, 0.0);
+
+        // Particle composition change. Losses go to the destruction terms,
+        // which vanish with theta as the corresponding element runs out.
+        double dmM = dM * WM * R / rho; // [kg / kg gas / s]
+        double dmO = dO * WO * R / rho;
+        if (dmM >= 0) {
+            momentsQ[kM] += dmM;
+        } else {
+            momentsD[kM] -= dmM;
+            massLoss -= dmM;
+        }
+        if (dO != 0) {
+            if (dmO >= 0) {
+                momentsQ[kO] += dmO;
+            } else {
+                momentsD[kO] -= dmO;
+                massLoss -= dmO;
+            }
+        }
+
+        // Gas species: reactant consumed, product released. By construction
+        // W[reactant] - W[product] == dM*WM + dO*WO, so mass is conserved.
+        speciesD[k] += W[k] * R / rho;
+        int p = options->surfProduct[r];
+        if (p >= 0) {
+            speciesQ[p] += W[p] * R / rho;
+        }
+    }
+
+    // Particle disintegration: once particles have shrunk to the threshold
+    // size, removing mass also removes particles, so that the mean particle
+    // mass (and size) stays fixed instead of shrinking further. The switch is
+    // ramped linearly over [dmin, 1.1*dmin]: with a hard switch at dmin the
+    // integrator chatters wherever growth and etching balance near dmin.
+    double dNdt_dis = 0.0;
+    double dmin = options->minParticleDiameter;
+    if (massLoss > 0 && dp < 1.1 * dmin) {
+        double ramp = std::min((1.1 * dmin - dp) / (0.1 * dmin), 1.0);
+        dNdt_dis = ramp * N * massLoss / (mM + std::max(mO, 0.0));
+        momentsD[kN] += dNdt_dis;
+    }
+
+    if (debug) {
+        logFile.write(format(
+            "surface reactions: j=%i x=%.4g | N=%.4e[kmol/kg] mM=%.4e mO=%.4e[kg/kg] "
+            "dp=%.4e[m] O/M=%.4g | massLoss=%.4e[kg/kg/s] dN/dt=-%.4e[kmol/kg/s]") %
+            j % x % N % mM % mO % dp % xO % massLoss % dNdt_dis);
     }
 }
 
@@ -313,6 +427,7 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
+    computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
     computeCoagulationRates(momentsD);
     dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
     dYdt += speciesQ - speciesD;
@@ -658,6 +773,7 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
+    computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
     computeCoagulationRates(momentsD);
     dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);
     dMomentsdtD = momentsD;

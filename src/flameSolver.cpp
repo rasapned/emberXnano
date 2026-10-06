@@ -773,7 +773,9 @@ void FlameSolver::updateParticleDiameter()
     }
 
     for (size_t j = 0; j < nPoints; j++) {
-        particleDiameter[j] = computeParticleDiameter(moments(kN, j), moments(kV, j));
+        double mO = (nMoments > kO) ? moments(kO, j) : 0.0;
+        particleDiameter[j] = computeParticleDiameter(
+            moments(kN, j), moments(kM, j), mO, options);
     }
 }
 
@@ -796,6 +798,11 @@ void FlameSolver::updateParticleDiffusivity()
             particleDiffusivity[j] = options.momentDiffusivity;
             continue;
         }
+
+        // Particles smaller than minParticleDiameter disintegrate, so a
+        // smaller mean size can only come from N/mass noise where both are
+        // near zero; since D_p ~ 1/dp^2 it would blow up the diffusivity.
+        dp = std::max(dp, options.minParticleDiameter);
 
         double meanFreePath = gasMeanFreePath(mu[j], T[j], Wmx[j], options.pressure);
         double Kn = 2.0 * meanFreePath / dp;

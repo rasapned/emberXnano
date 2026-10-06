@@ -1,16 +1,44 @@
 #include "particleUtils.h"
 #include "chemistry0d.h"
+#include "readConfig.h"
 
+#include <algorithm>
 #include <cmath>
 
-double particleVolumeFromMoments(double N, double V)
+double particleOxygenRatio(double mM, double mO, const ConfigOptions& opts)
 {
-    if (!(N > 0) || !(V > 0)) {
+    if (!(mM > 0) || !(mO > 0)) {
         return 0.0;
     }
+    return (mO / opts.oxygenWeight) / (mM / opts.metalWeight);
+}
+
+double particleBulkDensity(double mM, double mO, const ConfigOptions& opts)
+{
+    const std::vector<double>& xs = opts.phaseRatio;
+    const std::vector<double>& rhos = opts.phaseDensity;
+    size_t n = xs.size();
+
+    double x = std::min(std::max(particleOxygenRatio(mM, mO, opts), xs[0]), xs[n-1]);
+    for (size_t i = 0; i + 1 < n; i++) {
+        if (x <= xs[i+1]) {
+            double w = (x - xs[i]) / (xs[i+1] - xs[i]);
+            return rhos[i] + w * (rhos[i+1] - rhos[i]);
+        }
+    }
+    return rhos[n-1];
+}
+
+double particleVolumeFromMoments(double N, double mM, double mO,
+                                 const ConfigOptions& opts)
+{
+    if (!(N > 0) || !(mM > 0)) {
+        return 0.0;
+    }
+    double m = mM + std::max(mO, 0.0);
     // Avogadro's number here is Cantera's kmol-based constant, consistent
     // with computeNucleationRates() in sourceSystem.cpp.
-    return V / (N * Cantera::Avogadro); // [m^3]
+    return m / (N * Cantera::Avogadro) / particleBulkDensity(mM, mO, opts); // [m^3]
 }
 
 double particleDiameterFromVolume(double vParticle)
@@ -21,9 +49,10 @@ double particleDiameterFromVolume(double vParticle)
     return std::cbrt(6.0 * vParticle / M_PI);
 }
 
-double computeParticleDiameter(double N, double V)
+double computeParticleDiameter(double N, double mM, double mO,
+                               const ConfigOptions& opts)
 {
-    return particleDiameterFromVolume(particleVolumeFromMoments(N, V));
+    return particleDiameterFromVolume(particleVolumeFromMoments(N, mM, mO, opts));
 }
 
 double gasMeanFreePath(double mu, double T, double Wmx, double pressure)

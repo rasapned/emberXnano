@@ -23,7 +23,7 @@ public:
     //! @param uu        tangential velocity
     //! @param tt        temperature
     //! @param yy        vector of species mass fractions
-    //! @param mm        vector of particle moment scalars (N, V, ...)
+    //! @param mm        vector of particle moment scalars (N, mM, mO)
     virtual void setState(double tInitial, double uu, double tt,
                           const dvec& yy, const dvec& mm) = 0;
 
@@ -59,14 +59,23 @@ public:
     //! and destruction (D) rates for the particle moments and gas species so
     //! that `ydot = Q - D` for each. Shared by both SourceSystemCVODE::f()
     //! and SourceSystemQSS::odefun(). By construction (see readConfig.h),
-    //! particleDensity * dV/dt == total consumed species mass rate
-    //! identically, so that sum(Y) + particleDensity*V is an exact invariant.
+    //! dmM/dt == total consumed species mass rate identically, so that
+    //! sum(Y) + mM + mO is an exact invariant of the source terms.
     void computeNucleationRates(dvec& momentsQ, dvec& momentsD,
                                 dvec& speciesQ, dvec& speciesD);
 
+    //! Add the gas-particle surface reaction rates (see
+    //! `options->surfReactant` etc.) to the production/destruction terms of
+    //! the mM/mO moments and gas species, plus the particle-disintegration
+    //! sink of N for particles below `options->minParticleDiameter`. Called
+    //! after computeNucleationRates() so it adds to its terms. Mass is
+    //! conserved exactly between gas and particle phase.
+    void computeSurfaceReactionRates(dvec& momentsQ, dvec& momentsD,
+                                     dvec& speciesQ, dvec& speciesD);
+
     //! Add the Brownian coagulation sink to `momentsD[kN]` at the current
     //! state (T, moments, rho). Coagulation reduces particle number (N) but
-    //! conserves particle-phase volume (V), so only kN is affected. Shared
+    //! conserves particle-phase mass (mM, mO), so only kN is affected. Shared
     //! by both SourceSystemCVODE::f() and SourceSystemQSS::odefun(), called
     //! after computeNucleationRates() so it adds to (rather than replaces)
     //! its destruction term.
@@ -118,7 +127,7 @@ public:
     double U; //!< tangential velocity
     double T; //!< temperature
     dvec Y; //!< species mass fraction
-    dvec moments; //!< particle moment scalars (N, V, ...)
+    dvec moments; //!< particle moment scalars (N, mM, mO)
 
     //! Extra constant term introduced by splitting
     dvec splitConst;
@@ -149,7 +158,7 @@ protected:
     IntegratorCallback* heatLoss;
 
     size_t nSpec; //!< number of species
-    size_t nMoments; //!< number of particle moment (N, V, ...) variables
+    size_t nMoments; //!< number of particle moment (N, mM, mO) variables
     int j; //!< grid index for this system
     double x; //!< grid position for this system
     double rhou; //!< density of the unburned gas

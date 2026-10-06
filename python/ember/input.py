@@ -473,58 +473,127 @@ class NucleationChannel(Options):
     #: sigma in N/m.
     surfaceTensionCoeffs = Option([1.0, 0.0], level=2)
 
-    def validate(self, gas):
-        """Cross-check list lengths/composition against the mechanism *gas*."""
+    def validate(self, gas, metal):
+        """
+        Cross-check list lengths/composition against the mechanism *gas* and
+        the particle material *metal* (element name, e.g. 'Fe').
+        """
         if len(self.collisionSpeciesA.value) != len(self.collisionSpeciesB.value):
             raise ValueError(
                 "Particles.nucleation: collisionSpeciesA and collisionSpeciesB"
                 " must have the same length (%d != %d)." %
                 (len(self.collisionSpeciesA.value), len(self.collisionSpeciesB.value)))
 
-        element = None
         haveMonomer = False
         for name in self.precursorSpecies.value:
             composition = gas.species(name).composition
-            if len(composition) != 1:
+            if set(composition) != {metal}:
                 raise ValueError(
-                    "Particles.nucleation: precursor species '%s' must be"
-                    " composed of a single element; found %r." % (name, composition))
-            el, count = next(iter(composition.items()))
-            if count == 1:
+                    "Particles.nucleation: precursor species '%s' must be a"
+                    " cluster of the particle metal '%s'; found %r." %
+                    (name, metal, composition))
+            if composition[metal] == 1:
                 haveMonomer = True
-            if element is None:
-                element = el
-            elif el != element:
-                raise ValueError(
-                    "Particles.nucleation: all precursorSpecies must be"
-                    " clusters of the same element (got '%s' and '%s')." %
-                    (element, el))
         if self.precursorSpecies.value and not haveMonomer:
             raise ValueError(
                 "Particles.nucleation: precursorSpecies must include the"
-                " monomer (single-atom) species, e.g. 'Fe'.")
+                " monomer (single-atom) species, e.g. '%s'." % metal)
+
+        for name in (self.collisionSpeciesA.value + self.collisionSpeciesB.value):
+            if set(gas.species(name).composition) != {metal}:
+                raise ValueError(
+                    "Particles.nucleation: collision species '%s' must contain"
+                    " only the particle metal '%s' (homogeneous nucleation of"
+                    " oxides is not supported)." % (name, metal))
+
+
+class SurfaceReaction(Options):
+    """
+    A gas-particle surface reaction: gas species *reactant* impinges on a
+    particle and leaves as gas species *product* (or nothing, if *product* is
+    ``None``). The change of the particle (metal and/or O atoms added or
+    removed) is derived from the difference of the two species'
+    compositions, e.g. for iron particles ``O2 -> O`` adds one O atom
+    (oxidation), ``H2 -> H2O`` removes one O atom (reduction), ``O -> FeO``
+    removes one Fe atom (etching), ``FeO -> None`` adds one Fe and one O atom
+    (condensation). Evaluated in
+    ``src/sourceSystem.cpp::computeSurfaceReactionRates()``.
+
+    The rate [kmol/m^3/s] is ``A * exp(-Ta/T) * theta * a_p * C``, where
+    ``a_p`` is the particle surface area per unit volume [m^2/m^3], ``C`` the
+    reactant concentration [kmol/m^3] and ``theta`` the fraction of the
+    surface available to the reaction (surface composition = particle
+    composition): metal-site fraction for etching and oxidation, O-site
+    fraction for reduction, and 1 for condensation of metal-bearing species.
+    Reactions that would raise the particle O/metal ratio beyond the most
+    oxidized phase ``xMax`` (last entry of :attr:`Particles.phases`; adding
+    O-richer or removing metal-richer material, e.g. oxidation or etching)
+    are further multiplied by ``max(0, 1 - (O/metal)/xMax)``.
+    """
+
+    #: Impinging gas species.
+    reactant = StringOption(None)
+
+    #: Gas species leaving the particle, or ``None``.
+    product = StringOption(None)
+
+    #: Pre-exponential factor [m/s]. Always positive; whether matter is added
+    #: to or removed from the particle follows from *reactant*/*product*.
+    A = FloatOption(0.0, min=0)
+
+    #: Activation temperature [K].
+    Ta = FloatOption(0.0)
+
+    def particleChange(self, gas, metal):
+        """
+        Return the number of (metal, O) atoms added to the particle per
+        event, checking that the reaction is valid for the mechanism *gas*
+        and the particle metal *metal* (element name, e.g. 'Fe').
+        """
+        label = '%s -> %s' % (self.reactant.value, self.product.value)
+        delta = dict(gas.species(self.reactant.value).composition)
+        if self.product.value is not None:
+            for el, n in gas.species(self.product.value).composition.items():
+                delta[el] = delta.get(el, 0) - n
+
+        for el, n in delta.items():
+            if el not in (metal, 'O') and n != 0:
+                raise ValueError(
+                    "Particles.surfaceReactions: '%s' does not balance"
+                    " element '%s' between reactant and product." % (label, el))
+        dM = int(delta.get(metal, 0))
+        dO = int(delta.get('O', 0))
+        if dM == 0 and dO == 0:
+            raise ValueError("Particles.surfaceReactions: '%s' does not change"
+                             " the particle." % label)
+        if dM * dO < 0:
+            raise ValueError("Particles.surfaceReactions: '%s' both adds and"
+                             " removes particle atoms." % label)
+        return dM, dO
 
 
 class Particles(Options):
     """
-    Settings controlling the (currently passive-scalar) transport of
-    particle "moments" -- extra scalar fields transported alongside the
-    normal state variables (temperature, velocity, species). This is a
-    first step toward a full population-balance model for nanoparticles
-    (number density, volume density, composition, etc.), coupled two-way
-    with the gas phase. For now, no source terms (nucleation, coagulation,
-    surface reactions, ...) are implemented -- the moments are purely
-    advected and diffused.
+    Settings controlling the transport of particle "moments" -- extra
+    scalar fields transported alongside the normal state variables
+    (temperature, velocity, species), coupled two-way with the gas phase
+    through nucleation and surface reactions. Particles consist of a metal
+    (*metal*) and oxygen. The moments are, per kg of gas: N (kmol of
+    particles), mM (kg of particle-phase metal) and mO (kg of particle-phase
+    O). The particle size follows from the mass per particle and a density
+    interpolated between the material *phases* according to the O/metal
+    ratio.
     """
 
-    #: Number of particle moment scalars to transport. Set to 0 (default)
-    #: to disable the particle module entirely.
-    nMoments = IntegerOption(0, min=0)
+    #: Number of particle moment scalars to transport: 0 (default) disables
+    #: the particle module, 2 transports pure-metal particles (N, mM), 3 also
+    #: transports particle-phase oxygen (N, mM, mO).
+    nMoments = IntegerOption(0, min=0, max=3)
 
     #: Fallback diffusivity [m^2/s] for the particle moment scalars, used
-    #: only where no particles are present yet (N or V == 0). Everywhere
+    #: only where no particles are present yet (N or mM == 0). Everywhere
     #: particles exist, the actual diffusivity is instead computed at each
-    #: grid point from the local mean particle size (via the N and V
+    #: grid point from the local mean particle size (via the N, mM and mO
     #: moments) and gas state, using the Stokes-Einstein relation with the
     #: Cunningham slip correction -- see
     #: ``src/flameSolver.cpp::updateParticleDiffusivity()``.
@@ -544,21 +613,31 @@ class Particles(Options):
     nucleation = Option(None)
 
     #: Enable the Brownian coagulation sink term for the N moment (particles
-    #: colliding and merging: N decreases, V is unchanged). See
+    #: colliding and merging: N decreases, mass is unchanged). See
     #: ``src/sourceSystem.cpp::computeCoagulationRates()``. Has no effect
-    #: unless ``nMoments`` >= 2 (both N and V moments are required).
+    #: unless ``nMoments`` >= 2 (both N and mM moments are required).
     coagulation = BoolOption(False, level=1)
 
-    #: Bulk density of the particle material [kg/m^3], used to convert
-    #: between consumed gas mass and particle volume. Used directly unless
-    #: *particlePhaseName* is set and successfully found in the mechanism.
-    particleDensity = FloatOption(7874.0, min=0)
+    #: List of :class:`SurfaceReaction` gas-particle surface reactions
+    #: (oxidation, reduction, etching, condensation). Reactions that change
+    #: the particle's O content require ``nMoments`` == 3.
+    surfaceReactions = Option([])
 
-    #: Optional name of a condensed (solid) phase defined in the mechanism
-    #: file, used to look up *particleDensity* automatically instead of
-    #: using the manually-specified value. Falls back to *particleDensity*
-    #: with a warning if the phase cannot be found.
-    particlePhaseName = StringOption(None, level=1)
+    #: Particle diameter [m] below which mass-removing surface reactions
+    #: also remove particles (disintegration): N then decreases in
+    #: proportion to the removed mass, keeping the particle size fixed.
+    minParticleDiameter = FloatOption(0.4e-9, min=0, level=1)
+
+    #: Element name of the particle metal, as used in the mechanism.
+    metal = StringOption('Fe')
+
+    #: Particle material phases as a list of ``(O/metal atomic ratio,
+    #: bulk density [kg/m^3])`` pairs, in ascending ratio and starting with
+    #: the pure metal (ratio 0). The particle density is interpolated
+    #: linearly in the O/metal ratio between them; the last ratio is the most
+    #: oxidized state the particles can reach. The default is iron: Fe, FeO,
+    #: Fe3O4 and Fe2O3.
+    phases = Option([(0.0, 7874.0), (1.0, 5745.0), (4.0/3.0, 5170.0), (1.5, 5240.0)])
 
 
 class InitialCondition(Options):

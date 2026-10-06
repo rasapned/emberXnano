@@ -119,12 +119,18 @@ cdef extern from "readConfig.h":
         int nMoments
         double momentDiffusivity, momentBCLeft, momentBCRight
 
-        double particleDensity
+        vector[double] phaseRatio, phaseDensity
+        double metalWeight, oxygenWeight
         cbool coagulation
+        double minParticleDiameter
         vector[int] nucSpeciesA, nucSpeciesB
         vector[int] nucStoichA, nucStoichB
-        vector[double] nucVolumePerEvent
+        vector[double] nucMassPerEvent
         vector[double] nucCollisionPrefactor
+
+        vector[int] surfReactant, surfProduct
+        vector[double] surfA, surfTa
+        vector[int] surfDeltaM, surfDeltaO
 
         vector[int] nucPrecursorSpecies
         vector[int] nucPrecursorAtomCount

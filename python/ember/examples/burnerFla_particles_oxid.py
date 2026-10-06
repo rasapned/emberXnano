@@ -4,7 +4,10 @@ Burner-stabilized flame in ember: single premixed inlet at a prescribed mass
 flux (no opposing stream), unstrained (a=0), free/adiabatic outlet.
 
 Gas-phase setup as in burnerFla_test.py, plus iron particle moments
-(nucleation from Fe clusters, coagulation).
+(nucleation from Fe clusters, coagulation) -- as burnerFla_particles.py, but
+with particle-phase oxygen (nMoments=3) and the gas-particle surface reactions
+of the OpenFOAM model (oxidation by O2/O/H2O, reduction by H2/H, etching by
+OH); see surfaceReactions below.
 
 Ember's initial guess is the converged Cantera BurnerFlame solution (solved
 below, also used as the reference to compare against), which converges
@@ -27,7 +30,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_particles_corrMech'
+output = 'run/burnerFla_particles_oxid'
 
 
 # Same reactant composition as single_Igor_nucl.py
@@ -120,13 +123,46 @@ for i in range(1, maxClusterSize + 1):
 print("Nucleation channels:",
       list(zip(collisionSpeciesA, collisionSpeciesB)))
 
+# --- Surface reactions, translated from the OpenFOAM setup ------------------
+# OpenFOAM: (impinging species, gas product, particle species changed) with
+# (pre-exponential factor, activation energy). Conversion to ember:
+#  - A: OpenFOAM's factor carries Avogadro's number (rate counted in
+#    molecules), so A_ember [m/s] = |A_OF| / N_A, with N_A per kmol. The sign
+#    of A_OF (+ adds to, - removes from the particle) is not an input in ember
+#    -- it follows from reactant/product compositions -- but is checked below.
+#  - Ea [J/mol] -> activation temperature Ta = Ea / R, R = 8.314 J/mol/K.
+#  - (O AR O): AR is OpenFOAM's placeholder for "no gas product" (the O atom
+#    stays on the particle), i.e. product=None here.
+R_JmolK = 8.314
+openfoamReactions = [
+    # reactant, product, A_OF,     Ea [J/mol]
+    ('O2',  'O',    2.324e26,  8.314e3),   # oxidation
+    ('O',   None,   2.629e26,  0.000),     # oxidation (OpenFOAM product: AR)
+    ('H2O', 'H2',   2.714e26,  1.081e4),   # oxidation
+    ('H2',  'H2O', -8.040e26,  1.663e4),   # reduction
+    ('H',   'OH',  -1.079e27,  4.157e3),   # reduction
+    ('OH',  'FEOH', -2.568e27, 1.829e4),   # etching (removes Fe)
+]
+surfaceReactions = []
+for reactant, product, A_OF, Ea in openfoamReactions:
+    reaction = SurfaceReaction(reactant=reactant, product=product,
+                               A=abs(A_OF) / ct.avogadro, Ta=Ea / R_JmolK)
+    dM, dO = reaction.particleChange(gas, 'Fe')
+    if (dM + dO > 0) != (A_OF > 0):
+        raise ValueError("Surface reaction %s -> %s: sign of A (%g) does not"
+                         " match the particle change (dFe=%d, dO=%d)" %
+                         (reactant, product, A_OF, dM, dO))
+    surfaceReactions.append(reaction)
+    print("Surface reaction %-4s -> %-5s dFe=%+d dO=%+d  A=%.4g m/s  Ta=%.1f K" %
+          (reactant, product, dM, dO, reaction.A.value, reaction.Ta.value))
+
 conf = Config(
     Paths(outputDir=output),
     Chemistry(mechanismFile=mechanism,
               transportModel='Mix'),
     General(twinFlame=False,
             flameGeometry='planar',
-            nThreads=1,
+            nThreads=16,
             chemistryIntegrator='cvode',
             # Strang leaves the cross terms out of drhodt, which leaks mass
             # at the burner (V ~ +7.6%); balanced splitting doesn't
@@ -192,7 +228,7 @@ conf = Config(
         tEnd=0.2,           # generous headroom
     ),
     Particles(
-        nMoments=2,
+        nMoments=3,                 # N, Fe mass, O mass
         momentBCLeft=0.0,
         metal='Fe',
         # (O/metal atomic ratio, density [kg/m3]): Fe, FeO, Fe3O4, Fe2O3
@@ -202,6 +238,7 @@ conf = Config(
             collisionSpeciesB=collisionSpeciesB,
         ),
         coagulation=True,
+        surfaceReactions=surfaceReactions,
     ),
 )
 
@@ -336,4 +373,25 @@ if __name__ == '__main__':
     fig.suptitle('Ember (with particles) vs Cantera BurnerFlame')
     fig.tight_layout()
     fig.savefig(output + '/Particles_overview.png')
+    plt.close(fig)
+
+    # --- Particle composition: Fe and O mass in the particle phase and the
+    # O/Fe atomic ratio (capped at 1.5 = Fe2O3, the last entry of phases).
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5), sharex=True)
+    axes[0].plot(struct.x, struct.moments[1], lw=2)
+    axes[0].set_title('Particle-phase Fe')
+    axes[0].set_ylabel('Mass per mass of gas [-]')
+    axes[1].plot(struct.x, struct.moments[2], lw=2)
+    axes[1].set_title('Particle-phase O')
+    axes[1].set_ylabel('Mass per mass of gas [-]')
+    axes[2].plot(struct.x, struct.particleOxygenRatio, lw=2)
+    axes[2].axhline(1.5, color='k', ls='--', lw=0.8, label='Fe2O3')
+    axes[2].axhline(4/3, color='0.5', ls=':', lw=0.8, label='Fe3O4')
+    axes[2].axhline(1.0, color='0.7', ls=':', lw=0.8, label='FeO')
+    axes[2].set_title('Particle O/Fe atomic ratio')
+    axes[2].legend(loc='best', fontsize=8)
+    for ax in axes:
+        ax.set_xlabel('Position [m]')
+    fig.tight_layout()
+    fig.savefig(output + '/Particles_composition.png')
     plt.close(fig)
