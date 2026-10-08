@@ -240,6 +240,9 @@ conf = Config(
             collisionSpeciesB=collisionSpeciesB,
         ),
         coagulation=True,
+        # Particles shrinking below this diameter [m] disintegrate (N removed
+        # with the lost mass); also the floor for the particle-diffusivity size.
+        minParticleDiameter=0.5e-9,
         surfaceReactions=surfaceReactions,
         condensationSpecies=clusterSpecies + ['FEO'],
     ),

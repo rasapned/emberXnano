@@ -126,7 +126,7 @@ conf = Config(
               transportModel='Mix'),
     General(twinFlame=False,
             flameGeometry='planar',
-            nThreads=1,
+            nThreads=16,
             chemistryIntegrator='cvode',
             # Strang leaves the cross terms out of drhodt, which leaks mass
             # at the burner (V ~ +7.6%); balanced splitting doesn't
