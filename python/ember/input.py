@@ -519,7 +519,9 @@ class SurfaceReaction(Options):
     (condensation). Evaluated in
     ``src/sourceSystem.cpp::computeSurfaceReactionRates()``.
 
-    The rate [kmol/m^3/s] is ``A * exp(-Ta/T) * theta * a_p * C``, where
+    The rate [kmol/m^3/s] is ``A * exp(-Ta/T) * theta * a_p * C``, with T
+    the particle temperature when it is transported (``Particles.energy`` = True) and
+    the gas temperature otherwise, where
     ``a_p`` is the particle surface area per unit volume [m^2/m^3], ``C`` the
     reactant concentration [kmol/m^3] and ``theta`` the fraction of the
     surface available to the reaction (surface composition = particle
@@ -543,6 +545,12 @@ class SurfaceReaction(Options):
 
     #: Activation temperature [K].
     Ta = FloatOption(0.0)
+
+    #: Reaction enthalpy [J/mol of events], used only with the particle
+    #: energy moment (``Particles.energy`` = True): the heat -deltaH goes into the
+    #: particle (negative = exothermic, heats it). The enthalpy change of the
+    #: particle composition itself is taken from the phase thermo data.
+    deltaH = FloatOption(0.0)
 
     def particleChange(self, gas, metal):
         """
@@ -590,6 +598,19 @@ class Particles(Options):
     #: transports particle-phase oxygen (N, mM, mO).
     nMoments = IntegerOption(0, min=0, max=3)
 
+    #: Particle energy: also transport the particle enthalpy H [J / kg gas]
+    #: (an extra moment, after N, mM, mO; requires ``nMoments`` = 3), from
+    #: which the particle temperature follows, so particles can be hotter or
+    #: colder than the gas. H receives the enthalpy of the nucleating and
+    #: condensing gas molecules and the surface reaction heats
+    #: (``SurfaceReaction.deltaH``; their Arrhenius rates then use the particle
+    #: temperature), and loses heat by conduction to the gas
+    #: (*thermalAccommodation*) and radiation (*radiationAbsorption*,
+    #: *radiationTsurr*). The gas energy equation is not coupled back. The
+    #: phases need their condensed species (see *phases*). With *False*
+    #: (default) the particles are at the gas temperature.
+    energy = BoolOption(False)
+
     #: Fallback diffusivity [m^2/s] for the particle moment scalars, used
     #: only where no particles are present yet (N or mM == 0). Everywhere
     #: particles exist, the actual diffusivity is instead computed at each
@@ -620,7 +641,7 @@ class Particles(Options):
 
     #: List of :class:`SurfaceReaction` gas-particle surface reactions
     #: (oxidation, reduction, etching, condensation). Reactions that change
-    #: the particle's O content require ``nMoments`` == 3.
+    #: the particle's O content require ``nMoments`` >= 3.
     surfaceReactions = Option([])
 
     #: Gas species that condense heterogeneously onto existing particles
@@ -632,7 +653,7 @@ class Particles(Options):
     #: collision diameter d_k from the mechanism's transport data and
     #: sticking probability 1. Species richer in O than the most oxidized
     #: phase are subject to the same gradual cap as surface reactions.
-    #: Oxygen-containing species require ``nMoments`` == 3.
+    #: Oxygen-containing species require ``nMoments`` >= 3.
     condensationSpecies = Option([])
 
     #: Particle diameter [m] below which mass-removing surface reactions
@@ -644,12 +665,37 @@ class Particles(Options):
     metal = StringOption('Fe')
 
     #: Particle material phases as a list of ``(O/metal atomic ratio,
-    #: bulk density [kg/m^3])`` pairs, in ascending ratio and starting with
-    #: the pure metal (ratio 0). The particle density is interpolated
-    #: linearly in the O/metal ratio between them; the last ratio is the most
-    #: oxidized state the particles can reach. The default is iron: Fe, FeO,
-    #: Fe3O4 and Fe2O3.
-    phases = Option([(0.0, 7874.0), (1.0, 5745.0), (4.0/3.0, 5170.0), (1.5, 5240.0)])
+    #: bulk density [kg/m^3], condensed species)`` entries, in ascending ratio
+    #: and starting with the pure metal (ratio 0). The particle density (and
+    #: with *energy* = True the enthalpy) is interpolated linearly in the
+    #: O/metal ratio between them; the last ratio is the most oxidized state
+    #: the particles can reach. The condensed species (from *thermoFile*) are
+    #: needed only with *energy* = True: at each temperature the one with the
+    #: lowest Gibbs energy among those valid there is used, so polymorphs and
+    #: the liquid (melting) can be listed together. The default is iron: Fe,
+    #: FeO, Fe3O4 and Fe2O3.
+    phases = Option([(0.0, 7874.0, ['Fe(a)', 'Fe(c)', 'Fe(d)', 'Fe(L)']),
+                     (1.0, 5745.0, ['FeO(s)', 'FeO(L)']),
+                     (4.0/3.0, 5170.0, ['Fe3O4(s)']),
+                     (1.5, 5240.0, ['Fe2O3(s)'])])
+
+    #: Cantera YAML file with the condensed-phase thermo of the *phases*
+    #: species (*energy* = True). Cantera's ``nasa_condensed.yaml`` uses the
+    #: same reference state as NASA gas-phase data.
+    thermoFile = StringOption('nasa_condensed.yaml', level=1)
+
+    #: Thermal accommodation coefficient for gas-particle conduction
+    #: (*energy* = True). Typical values for iron and iron oxide
+    #: nanoparticles: 0.1-0.4.
+    thermalAccommodation = FloatOption(0.3, min=0, level=1)
+
+    #: Absorption function E(m) for the Rayleigh-limit particle radiation
+    #: (*energy* = True); 0 disables radiation.
+    radiationAbsorption = FloatOption(0.3, min=0, level=1)
+
+    #: Temperature of the surroundings for the particle radiation [K]
+    #: (*energy* = True).
+    radiationTsurr = FloatOption(300.0, min=0, level=1)
 
 
 class InitialCondition(Options):

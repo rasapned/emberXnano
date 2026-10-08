@@ -137,6 +137,10 @@ cdef extern from "readConfig.h":
         vector[double] condDiameter
         vector[int] condDeltaM, condDeltaO
 
+        vector[double] particleThermoT, phaseEnthalpy
+        double thermalAccommodation, radiationAbsorption, radiationTsurr
+        vector[double] surfDeltaH
+
         vector[int] nucPrecursorSpecies
         vector[int] nucPrecursorAtomCount
         int nucMonomerIndex
@@ -272,6 +276,7 @@ cdef extern from "flameSolver.h":
         CxxEigenMatrix rhoD
         CxxEigenMatrix Dkt
         CxxEigenVec particleDiameter
+        CxxEigenVec particleTemperature
         CxxEigenVec particleDiffusivity
         CxxEigenMatrix hk
         CxxEigenMatrix jFick

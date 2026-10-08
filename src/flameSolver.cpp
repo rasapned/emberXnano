@@ -612,6 +612,7 @@ void FlameSolver::resizeAuxiliary()
     rhoD.resize(nSpec, nPoints);
     Dkt.resize(nSpec, nPoints);
     particleDiameter.setZero(nPoints);
+    particleTemperature = T;
     particleDiffusivity.setConstant(nPoints, options.momentDiffusivity);
     wDot.resize(nSpec, nPoints);
     hk.resize(nSpec, nPoints);
@@ -887,6 +888,14 @@ void FlameSolver::updateParticleDiameter()
         double mO = (nMoments > kO) ? moments(kO, j) : 0.0;
         particleDiameter[j] = computeParticleDiameter(
             moments(kN, j), moments(kM, j), mO, options);
+    }
+
+    particleTemperature = T;
+    if (nMoments > kH) {
+        for (size_t j = 0; j < nPoints; j++) {
+            particleTemperature[j] = ::particleTemperature(
+                moments(kH, j), moments(kM, j), moments(kO, j), T(j), options);
+        }
     }
 }
 

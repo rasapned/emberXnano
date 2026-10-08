@@ -336,7 +336,10 @@ cdef class ConfigOptions:
         opts.unstrainedDownstreamWidth = self.grid.unstrainedDownstreamWidth
 
         # Particles (passive scalar moment transport)
-        opts.nMoments = self.particles.nMoments
+        # The particle enthalpy is an extra moment after N, mM, mO
+        if self.particles.energy and self.particles.nMoments != 3:
+            raise ValueError("particles.energy requires nMoments = 3.")
+        opts.nMoments = self.particles.nMoments + (1 if self.particles.energy else 0)
         opts.momentDiffusivity = self.particles.momentDiffusivity
         opts.momentBCLeft = self.particles.momentBCLeft
         opts.momentBCRight = self.particles.momentBCRight
@@ -346,22 +349,42 @@ cdef class ConfigOptions:
         if self.particles.nMoments > 0 and metal not in self.gas.element_names:
             raise ValueError("particles.metal: element '%s' is not in the"
                              " mechanism." % metal)
-        phases = [(float(x), float(rho)) for x, rho in self.particles.phases]
+        phases = [(float(p[0]), float(p[1])) for p in self.particles.phases]
         if (not phases or phases[0][0] != 0.0 or
                 any(b[0] <= a[0] for a, b in zip(phases, phases[1:])) or
                 any(rho <= 0 for _, rho in phases)):
-            raise ValueError("particles.phases must be (O/metal ratio, density)"
-                             " pairs with ascending ratios starting at 0 (pure"
-                             " metal) and positive densities; got %r." % (phases,))
+            raise ValueError("particles.phases must be (O/metal ratio, density"
+                             "[, species]) entries with ascending ratios starting"
+                             " at 0 (pure metal) and positive densities; got %r."
+                             % (phases,))
         opts.phaseRatio = [x for x, _ in phases]
         opts.phaseDensity = [rho for _, rho in phases]
         opts.metalWeight = cantera.Element(metal).weight
         opts.oxygenWeight = cantera.Element('O').weight
+
+        # Particle energy: enthalpy tables of the phases [J per kmol metal]
+        opts.thermalAccommodation = self.particles.thermalAccommodation
+        opts.radiationAbsorption = self.particles.radiationAbsorption
+        opts.radiationTsurr = self.particles.radiationTsurr
+        if self.particles.energy:
+            if any(len(p) < 3 or not p[2] for p in self.particles.phases):
+                raise ValueError("particles.phases: with energy = True every phase"
+                                 " needs its condensed species, as (ratio, density,"
+                                 " [species]).")
+            Tgrid = np.arange(200.0, 5000.0 + 1.0, 2.0)
+            table = _phaseEnthalpyTable(self.particles.thermoFile,
+                                        [list(p[2]) for p in self.particles.phases],
+                                        opts.phaseRatio, metal, Tgrid)
+            opts.particleThermoT = list(Tgrid)
+            opts.phaseEnthalpy = list(table.ravel())
+            if self.general.chemistryIntegrator != 'cvode':
+                print("Warning: the particle energy moment relaxes on ~us time"
+                      " scales; use chemistryIntegrator='cvode'.")
         opts.coagulation = self.particles.coagulation
         opts.minParticleDiameter = self.particles.minParticleDiameter
 
         surfReactant, surfProduct = [], []
-        surfA, surfTa = [], []
+        surfA, surfTa, surfDeltaH = [], [], []
         surfDeltaM, surfDeltaO = [], []
         for reaction in self.particles.surfaceReactions:
             dM, dO = reaction.particleChange(self.gas, metal)
@@ -377,12 +400,18 @@ cdef class ConfigOptions:
                 surfProduct.append(self.gas.species_index(reaction.product.value))
             surfA.append(reaction.A.value)
             surfTa.append(reaction.Ta.value)
+            surfDeltaH.append(reaction.deltaH.value * 1000.0) # [J/kmol]
+            if self.particles.energy and reaction.deltaH.value == 0.0:
+                print("Warning: surface reaction '%s -> %s' has deltaH = 0 (no"
+                      " reaction heat into the particle)."
+                      % (reaction.reactant.value, reaction.product.value))
             surfDeltaM.append(dM)
             surfDeltaO.append(dO)
         opts.surfReactant = surfReactant
         opts.surfProduct = surfProduct
         opts.surfA = surfA
         opts.surfTa = surfTa
+        opts.surfDeltaH = surfDeltaH
         opts.surfDeltaM = surfDeltaM
         opts.surfDeltaO = surfDeltaO
 
@@ -532,6 +561,48 @@ cdef class ConfigOptions:
             opts.terminationAbsTol = TC.abstol
             opts.termination_dTdtTol = TC.dTdtTol
             opts.termination_momentsTol = TC.momentsTol
+
+
+def _phaseEnthalpyTable(thermoFile, phaseSpecies, phaseRatio, metal, Tgrid):
+    """
+    Enthalpy [J per kmol of metal] of each particle phase on the temperature
+    grid *Tgrid*, from the condensed species *phaseSpecies* (one list per
+    phase) in *thermoFile*. At each temperature the species with the lowest
+    Gibbs energy among those whose data range covers it is used (polymorphs,
+    melting); outside all ranges, h is extrapolated linearly with cp from the
+    nearest range end.
+    """
+    allSpecies = {s.name: s for s in cantera.Species.list_from_file(thermoFile)}
+    table = np.zeros((len(phaseSpecies), len(Tgrid)))
+    for i, (names, ratio) in enumerate(zip(phaseSpecies, phaseRatio)):
+        candidates = []
+        for name in names:
+            if name not in allSpecies:
+                raise ValueError("particles.phases: species '%s' not found in"
+                                 " '%s'." % (name, thermoFile))
+            sp = allSpecies[name]
+            comp = sp.composition
+            nM = comp.get(metal, 0.0)
+            if (set(comp) - {metal, 'O'} or nM == 0 or
+                    abs(comp.get('O', 0.0) / nM - ratio) > 1e-6):
+                raise ValueError("particles.phases: species '%s' (%r) does not"
+                                 " match the phase's O/%s ratio %g." %
+                                 (name, comp, metal, ratio))
+            candidates.append((sp.thermo, nM))
+        for n, T in enumerate(Tgrid):
+            valid = [c for c in candidates if c[0].min_temp <= T <= c[0].max_temp]
+            if valid:
+                th, nM = min(valid, key=lambda c: (c[0].h(T) - T * c[0].s(T)) / c[1])
+                table[i, n] = th.h(T) / nM
+            else:
+                th, nM = min(candidates, key=lambda c: min(abs(T - c[0].min_temp),
+                                                           abs(T - c[0].max_temp)))
+                Tb = min(max(T, th.min_temp), th.max_temp)
+                table[i, n] = (th.h(Tb) + th.cp(Tb) * (T - Tb)) / nM
+        if np.any(np.diff(table[i]) <= 0):
+            raise ValueError("particles.phases: enthalpy of phase %d (%r) is not"
+                             " increasing with temperature." % (i, names))
+    return table
 
 
 cdef np.ndarray[np.double_t, ndim=1] chebyshev1(double x, int N):
@@ -828,6 +899,15 @@ cdef class FlameSolver:
             nM = mM / self.options.opts.metalWeight
             nO = self.moments[2, :] / self.options.opts.oxygenWeight
             return np.where(mM > 0, nO / np.where(mM > 0, nM, 1.0), 0.0)
+
+    property particleTemperature:
+        """
+        Particle temperature [K] from the enthalpy moment (``moments[3]``);
+        equal to the gas temperature without it (``particles.energy`` off) or
+        where no particles are present.
+        """
+        def __get__(self):
+            return getArray_Vec(self.solver.particleTemperature)
 
     property particleDiffusivity:
         """Particle Brownian diffusivity [m^2/s] (Stokes-Einstein-Cunningham)."""

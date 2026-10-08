@@ -88,6 +88,15 @@ public:
     //! its destruction term.
     void computeCoagulationRates(dvec& momentsD);
 
+    //! Particle energy (nMoments > kH): set #Tp from the enthalpy moment,
+    //! or to the gas temperature otherwise. Call before the compute*Rates.
+    void updateParticleTemperature();
+
+    //! Heat lost by the particles to the gas (conduction, free-molecular /
+    //! continuum interpolation) and by radiation (Rayleigh limit), added to
+    //! momentsQ[kH] [J / kg gas / s]. Only with nMoments > kH.
+    void computeParticleHeatTransfer(dvec& momentsQ);
+
     //! Set the CanteraGas object to use for thermodynamic and kinetic property
     //! calculations.
     void setGas(CanteraGas* _gas) { gas = _gas; }
@@ -134,7 +143,8 @@ public:
     double U; //!< tangential velocity
     double T; //!< temperature
     dvec Y; //!< species mass fraction
-    dvec moments; //!< particle moment scalars (N, mM, mO)
+    dvec moments; //!< particle moment scalars (N, mM, mO, H)
+    double Tp; //!< particle temperature [K] (== T without the H moment)
 
     //! Extra constant term introduced by splitting
     dvec splitConst;

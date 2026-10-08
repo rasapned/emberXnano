@@ -173,6 +173,24 @@ species), so they are **mass-specific** quantities, not raw densities:
   (metal, clusters, oxides) added to particles at the hard-sphere
   gas-particle collision rate, collision diameters from the mechanism's
   transport data, as for collision nucleation.
+- Particle energy (`Particles(nMoments=3, energy=True)`; internally one more
+  moment row, index `kH = 3`, so C++ `nMoments` = 4): H = absolute particle
+  enthalpy [J / kg gas] on the gas thermo's reference; T_p is obtained by
+  inverting tabulated phase enthalpies (`particleTemperature()` in
+  `particleUtils.cpp`; tables built in `_ember.pyx::_phaseEnthalpyTable` from
+  `Particles.phases` condensed species in `nasa_condensed.yaml`, lowest Gibbs
+  energy per T, lever rule in O/metal). Sources: nucleation and condensation
+  add the gas molecules' enthalpy hk(T_gas) (latent heat consistent with the
+  mechanism); surface reactions book the composition change at T_p plus the
+  user heat `-SurfaceReaction.deltaH` [J/mol], and their Arrhenius factor
+  uses T_p; conduction (free-molecular with `thermalAccommodation`, harmonic
+  with continuum) and Rayleigh radiation (`radiationAbsorption` E(m),
+  `radiationTsurr`) in `computeParticleHeatTransfer()`. No coupling back to the
+  gas energy equation; no evaporation. The relaxation time is ~µs at nm sizes
+  and 3000 Pa, so use `chemistryIntegrator='cvode'`. With `energy=False`
+  (default) the code paths are unchanged (T_p = T_gas). Check: α → ∞ and E(m) = 0 gives
+  T_p ≈ T_gas. In plots, the particle mass is `moments[1:3]`, not
+  `moments[1:]` (that would add H).
 - Cross terms (Soret/thermal-diffusion coupling) are explicitly zeroed for
   moments (`flameSolver.cpp`, `updateCrossTerms`) — only plain Fickian
   diffusion applies.

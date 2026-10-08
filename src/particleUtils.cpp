@@ -55,6 +55,96 @@ double computeParticleDiameter(double N, double mM, double mO,
     return particleDiameterFromVolume(particleVolumeFromMoments(N, mM, mO, opts));
 }
 
+namespace {
+// Phase segment [i, i+1] bracketing the O/metal ratio x, and the lever-rule
+// weight w of phase i+1 (w = 0 with i = last phase if there is only one).
+void phaseSegment(double x, const ConfigOptions& opts, size_t& i, double& w)
+{
+    const std::vector<double>& xs = opts.phaseRatio;
+    size_t n = xs.size();
+    i = 0;
+    w = 0.0;
+    if (n < 2) {
+        return;
+    }
+    x = std::min(std::max(x, xs[0]), xs[n-1]);
+    while (i + 2 < n && x > xs[i+1]) {
+        i++;
+    }
+    w = (x - xs[i]) / (xs[i+1] - xs[i]);
+}
+
+double phaseTableValue(size_t phase, size_t n, const ConfigOptions& opts)
+{
+    return opts.phaseEnthalpy[phase * opts.particleThermoT.size() + n];
+}
+}
+
+double particleEnthalpyPerMetal(double T, double x, const ConfigOptions& opts,
+                                double* dhdx)
+{
+    const std::vector<double>& Ts = opts.particleThermoT;
+    size_t nT = Ts.size();
+    T = std::min(std::max(T, Ts[0]), Ts[nT-1]);
+    size_t n = std::min(static_cast<size_t>(
+        std::upper_bound(Ts.begin(), Ts.end(), T) - Ts.begin()), nT - 1);
+    n = std::max(n, static_cast<size_t>(1)) - 1; // Ts[n] <= T <= Ts[n+1]
+    double s = (T - Ts[n]) / (Ts[n+1] - Ts[n]);
+
+    size_t i;
+    double w;
+    phaseSegment(x, opts, i, w);
+    double hi = (1 - s) * phaseTableValue(i, n, opts) + s * phaseTableValue(i, n+1, opts);
+    if (opts.phaseRatio.size() < 2) {
+        if (dhdx) {
+            *dhdx = 0.0;
+        }
+        return hi;
+    }
+    double hj = (1 - s) * phaseTableValue(i+1, n, opts) + s * phaseTableValue(i+1, n+1, opts);
+    if (dhdx) {
+        *dhdx = (hj - hi) / (opts.phaseRatio[i+1] - opts.phaseRatio[i]);
+    }
+    return (1 - w) * hi + w * hj;
+}
+
+double particleTemperature(double H, double mM, double mO, double Tgas,
+                           const ConfigOptions& opts)
+{
+    if (!(mM > 0)) {
+        return Tgas;
+    }
+    const std::vector<double>& Ts = opts.particleThermoT;
+    size_t nT = Ts.size();
+    double hTarget = H / (mM / opts.metalWeight); // [J per kmol metal]
+
+    size_t i;
+    double w;
+    phaseSegment(particleOxygenRatio(mM, mO, opts), opts, i, w);
+    size_t i2 = (opts.phaseRatio.size() < 2) ? i : i + 1;
+    auto h = [&](size_t n) {
+        return (1 - w) * phaseTableValue(i, n, opts) + w * phaseTableValue(i2, n, opts);
+    };
+
+    // h(T) increases monotonically (the jumps at phase transitions are
+    // resolved over one table interval), so bisect on the table index
+    if (hTarget <= h(0)) {
+        return Ts[0];
+    } else if (hTarget >= h(nT-1)) {
+        return Ts[nT-1];
+    }
+    size_t lo = 0, hi = nT - 1;
+    while (hi - lo > 1) {
+        size_t mid = (lo + hi) / 2;
+        if (h(mid) <= hTarget) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return Ts[lo] + (hTarget - h(lo)) / (h(hi) - h(lo)) * (Ts[hi] - Ts[lo]);
+}
+
 double gasMeanFreePath(double mu, double T, double Wmx, double pressure)
 {
     const double Ru_ = Cantera::GasConstant;

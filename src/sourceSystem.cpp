@@ -12,6 +12,7 @@
 SourceSystem::SourceSystem()
     : U(NaN)
     , T(NaN)
+    , Tp(NaN)
     , debug(false)
     , options(NULL)
     , gas(NULL)
@@ -105,6 +106,12 @@ void SourceSystem::computeNucleationRates
         // Gas species consumption: pure destruction
         speciesD[kA] += options->nucStoichA[c] * J * W[kA] / rho;
         speciesD[kB] += options->nucStoichB[c] * J * W[kB] / rho;
+
+        // The new particle takes the enthalpy of the consumed molecules
+        if (nMoments > kH) {
+            momentsQ[kH] += J * (options->nucStoichA[c] * hk[kA] +
+                                 options->nucStoichB[c] * hk[kB]) / rho;
+        }
     }
 
     // --- Classical nucleation theory (CNT) -------------------------------
@@ -165,6 +172,9 @@ void SourceSystem::computeNucleationRates
     momentsQ[kN] += J / rho;
     momentsQ[kM] += J * gStar * W[kMon] / rho;
     speciesD[kMon] += J * gStar * W[kMon] / rho;
+    if (nMoments > kH) {
+        momentsQ[kH] += J * gStar * hk[kMon] / rho;
+    }
 }
 
 void SourceSystem::computeCoagulationRates(dvec& momentsD)
@@ -241,6 +251,15 @@ void SourceSystem::computeSurfaceReactionRates
     const double WM = options->metalWeight;
     const double WO = options->oxygenWeight;
 
+    // Particle energy: enthalpy change of the particle composition at Tp per
+    // event, from H = nM * h(x, Tp) with x = nO/nM:
+    //     dH = (h - x*dh/dx) * dnM + dh/dx * dnO
+    // The reaction heat itself is the user-specified surfDeltaH.
+    double hP = 0.0, dhdx = 0.0;
+    if (nMoments > kH) {
+        hP = particleEnthalpyPerMetal(Tp, xO, *options, &dhdx);
+    }
+
     double massLoss = 0.0; // particle mass removal rate [kg / kg gas / s]
     for (size_t r = 0; r < nReactions; r++) {
         int dM = options->surfDeltaM[r];
@@ -269,7 +288,8 @@ void SourceSystem::computeSurfaceReactionRates
 
         size_t k = options->surfReactant[r];
         double conc = Y[k] * rho / W[k]; // [kmol/m^3]
-        double R = options->surfA[r] * exp(-options->surfTa[r] / T) *
+        // Arrhenius factor at the particle (surface) temperature
+        double R = options->surfA[r] * exp(-options->surfTa[r] / Tp) *
                    theta * area * conc; // [kmol/m^3/s]
         R = std::max(R, 0.0);
 
@@ -298,6 +318,11 @@ void SourceSystem::computeSurfaceReactionRates
         int p = options->surfProduct[r];
         if (p >= 0) {
             speciesQ[p] += W[p] * R / rho;
+        }
+
+        if (nMoments > kH) {
+            double dHcomposition = (hP - xO * dhdx) * dM + dhdx * dO; // [J/kmol]
+            momentsQ[kH] += R * (dHcomposition - options->surfDeltaH[r]) / rho;
         }
     }
 
@@ -372,7 +397,54 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& speciesD)
             momentsQ[kO] += dO * options->oxygenWeight * R / rho;
         }
         speciesD[k] += W[k] * R / rho;
+        if (nMoments > kH) {
+            momentsQ[kH] += R * hk[k] / rho; // enthalpy of the condensed molecules
+        }
     }
+}
+
+void SourceSystem::updateParticleTemperature()
+{
+    if (nMoments > kH) {
+        Tp = particleTemperature(moments[kH], moments[kM], moments[kO], T, *options);
+    } else {
+        Tp = T;
+    }
+}
+
+void SourceSystem::computeParticleHeatTransfer(dvec& momentsQ)
+{
+    if (nMoments <= kH) {
+        return;
+    }
+    double N = moments[kN];
+    double vParticle = particleVolumeFromMoments(N, moments[kM], moments[kO], *options);
+    if (!(vParticle > 0) || Tp == T) {
+        return;
+    }
+    const double NA_ = Cantera::Avogadro;
+    const double kB_ = Cantera::Boltzmann;
+    double dp = particleDiameterFromVolume(vParticle); // [m]
+
+    // Conduction: free-molecular limit (Filippov & Rosner 2000) with thermal
+    // accommodation alpha, combined harmonically with the continuum limit
+    double Wmx_ = gas->getMixtureMolecularWeight(); // [kg/kmol]
+    double cBar = sqrt(8.0 * kB_ * T / (M_PI * Wmx_ / NA_)); // mean molecular speed [m/s]
+    double gamma = cp / gas->thermo->cv_mass();
+    double qFM = options->thermalAccommodation * M_PI * dp * dp *
+                 gas->pressure / 8.0 * cBar * (gamma + 1) / (gamma - 1) *
+                 (Tp / T - 1.0); // [W]
+    double qC = 2.0 * M_PI * dp * gas->getThermalConductivity() * (Tp - T); // [W]
+    double q = qFM * qC / (qFM + qC);
+
+    // Radiation, Rayleigh limit (d << wavelength): emission ~ d^3 T^5 with
+    // the absorption function E(m), net exchange with surroundings at Tsurr
+    const double c5 = 8.0 * 24.0 * 1.0369277551433699; // 4*2*Gamma(5)*zeta(5)
+    double P = c5 * pow(M_PI, 3) * pow(dp, 3) * options->radiationAbsorption *
+               pow(kB_, 5) / (pow(Cantera::Planck, 4) * pow(Cantera::lightSpeed, 3)) *
+               (pow(Tp, 5) - pow(options->radiationTsurr, 5)); // [W]
+
+    momentsQ[kH] -= N * NA_ * (q + P); // N*NA particles per kg gas
 }
 
 void SourceSystem::setTimers
@@ -436,7 +508,8 @@ void SourceSystemCVODE::setOptions(ConfigOptions& opts)
         integrator->abstol[kSpecies+k] = options->integratorSpeciesAbsTol;
     }
     for (size_t m=0; m<nMoments; m++) {
-        integrator->abstol[kSpecies+nSpec+m] = options->integratorSpeciesAbsTol;
+        integrator->abstol[kSpecies+nSpec+m] = options->integratorSpeciesAbsTol *
+            ((m == kH) ? particleEnthalpyTolScale : 1.0);
     }
     integrator->reltol = options->integratorRelTol;
     integrator->minStep = options->integratorMinTimestep;
@@ -482,10 +555,12 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
 
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
+    updateParticleTemperature();
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
     computeCondensationRates(momentsQ, speciesD);
     computeCoagulationRates(momentsD);
+    computeParticleHeatTransfer(momentsQ);
     dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
     dYdt += speciesQ - speciesD;
 
@@ -755,6 +830,11 @@ void SourceSystemQSS::initialize(size_t new_nSpec, size_t new_nMoments)
     dMomentsdtD.setConstant(nMoments, 0);
 
     integrator.enforce_ymin[kMomentum] = false;
+    if (nMoments > kH) {
+        // The particle enthalpy is signed (oxide formation enthalpies); its
+        // whole net source is put in the "production" term
+        integrator.enforce_ymin[kSpecies+nSpec+kH] = false;
+    }
 }
 
 void SourceSystemQSS::setOptions(ConfigOptions& opts)
@@ -833,10 +913,12 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
 
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
+    updateParticleTemperature();
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
     computeCondensationRates(momentsQ, speciesD);
     computeCoagulationRates(momentsD);
+    computeParticleHeatTransfer(momentsQ);
     dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);
     dMomentsdtD = momentsD;
     dYdtQ += speciesQ;

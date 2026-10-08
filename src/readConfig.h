@@ -17,6 +17,14 @@ const size_t kWmx = 2; // never used in the same systems as kSpecies
 const size_t kN = 0;
 const size_t kM = 1;
 const size_t kO = 2;
+// Index 3 = particle enthalpy H (J / kg gas, absolute, on the same reference
+// as the gas-phase thermo; only present with particles.energy, i.e. when
+// nMoments >= 4 here, where nMoments counts all moment rows). The particle
+// temperature follows from H and the mass moments.
+const size_t kH = 3;
+//! Scale of the H moment [J/kg] relative to the mass-like moments, used to
+//! set its absolute integrator tolerances
+const double particleEnthalpyTolScale = 1e7;
 
 //! Possible boundary conditions for the continuity equations
 namespace ContinuityBoundaryCondition {
@@ -310,6 +318,20 @@ public:
     std::vector<int> condSpecies;
     std::vector<double> condDiameter;
     std::vector<int> condDeltaM, condDeltaO;
+
+    //! Particle energy (particles.energy, nMoments >= 4). particleThermoT [K] is a temperature
+    //! grid; phaseEnthalpy (row-major, nPhases x nT) holds for each phase the
+    //! enthalpy of its stable condensed species [J per kmol of metal], on the
+    //! same reference as the gas-phase thermo [particles.phases,
+    //! particles.thermoFile].
+    std::vector<double> particleThermoT, phaseEnthalpy;
+    double thermalAccommodation; //!< [particles.thermalAccommodation]
+    double radiationAbsorption; //!< E(m) [particles.radiationAbsorption]
+    double radiationTsurr; //!< [particles.radiationTsurr] [K]
+
+    //! Surface reaction enthalpy [J/kmol of events]; negative (exothermic)
+    //! heats the particle [surfaceReaction.deltaH]
+    std::vector<double> surfDeltaH;
 
     //! Classical nucleation theory (CNT), for a single monomer material
     //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in

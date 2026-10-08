@@ -124,6 +124,8 @@ class StateWriter(object):
                 self.write(data, ['particleDiameter', 'particleDiffusivity'])
             if self.solver.nMoments > 1:
                 data['particleOxygenRatio'] = self.solver.particleOxygenRatio
+            if self.solver.nMoments > 3:
+                self.write(data, ['particleTemperature'])
 
             # extended information
             if self.options.outputFiles.heatReleaseRate or errorFile:

@@ -35,6 +35,20 @@ double particleDiameterFromVolume(double vParticle);
 double computeParticleDiameter(double N, double mM, double mO,
                                const ConfigOptions& opts);
 
+//! Particle enthalpy [J per kmol of metal] at temperature T [K] for the
+//! O/metal atomic ratio x: lever rule between the bracketing phases (as for
+//! the density), linear in T on the opts.particleThermoT grid (T clamped to
+//! its range). If dhdx is given, it receives the slope dh/dx at fixed T.
+double particleEnthalpyPerMetal(double T, double x, const ConfigOptions& opts,
+                                double* dhdx=nullptr);
+
+//! Particle temperature [K] from the enthalpy moment H [J / kg gas] and the
+//! mass moments mM, mO [kg / kg gas], by inverting
+//! particleEnthalpyPerMetal() (clamped to the table range). Returns Tgas
+//! where no particles are present (mM <= 0).
+double particleTemperature(double H, double mM, double mO, double Tgas,
+                           const ConfigOptions& opts);
+
 //! Gas mean free path [m] from kinetic theory (Chapman-Enskog), evaluated
 //! from the local dynamic viscosity [Pa*s], temperature [K], mixture
 //! molecular weight [kg/kmol] and pressure [Pa].

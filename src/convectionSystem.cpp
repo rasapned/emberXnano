@@ -815,7 +815,7 @@ void ConvectionSystemSplit::configureMomentSolver(SundialsCvode& solver, const s
     solver.setBandwidth(0,0);
     solver.reltol = reltol;
     for (size_t j=0; j<nPoints; j++) {
-        solver.abstol[j] = abstolMoment;
+        solver.abstol[j] = abstolMoment * ((m == kH) ? particleEnthalpyTolScale : 1.0);
     }
     solver.linearMultistepMethod = CV_ADAMS;
 
