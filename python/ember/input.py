@@ -886,6 +886,56 @@ class PositionControl(Options):
     integralGain = FloatOption(800, filter=_isSymmetric)  #:
 
 
+class ImpingingJet(Options):
+    """
+    Impinging jet configuration, analogous to Cantera's ``ImpingingJet``: a
+    premixed stream enters at x = 0 (*xLeft* is forced to 0) and impinges on
+    an inert, impermeable, no-slip wall at x = *xRight*. The domain is fixed.
+
+    Boundary conditions (as Cantera's ``Inlet1D`` / ``Surface1D``):
+
+    - inlet: T = *Tu*, U = 0 (plug flow), species and particle moments from
+      the flux balance ``rho*u*Y + j = mdot*Y_in`` (the burner-style inlet
+      condition).
+    - wall: T = *wallTemperature*, U = 0, V = 0, zero species and particle
+      flux into the wall, and no gas-phase chemistry at the wall node.
+
+    In Cantera the pressure curvature Lambda is solved for, so that a given
+    inlet mass flux is reached. In ember it is set by the strain rate,
+    ``Lambda = -rhou * a**2 / beta**2`` (*StrainParameters*), and the inlet
+    mass flux follows. With *massFlux* set, *a* is instead adjusted by a PI
+    controller (acting on log(a), starting from ``StrainParameters.initial``)
+    until the inlet mass flux reaches *massFlux*; ``StrainParameters.final``
+    is then not used. The cold-flow estimate ``a = massFlux / (rhou * xRight)``
+    is a lower bound; heat release raises the required *a* (about 3x for a
+    lean H2/air flame filling half of the gap).
+
+    The thin plug-flow layer at the inlet limits the split time step: if the
+    run fails within the first few steps, reduce ``Times.globalTimestep``
+    (1e-5 s was needed at a ~ 900 1/s, 1 atm).
+    """
+
+    #: Temperature of the wall [K]
+    wallTemperature = FloatOption(300.0)
+
+    #: Target inlet mass flux [kg/m^2*s], or *None* to prescribe the strain
+    #: rate instead
+    massFlux = FloatOption(None)
+
+    #: Proportional gain of the mass flux controller (on the relative error)
+    proportionalGain = FloatOption(0.5, level=2)
+
+    #: Integral gain of the mass flux controller [1/s]
+    integralGain = FloatOption(200.0, level=2)
+
+    #: Prescribed temperature profile ``(x [m], T [K])`` (two arrays). If
+    #: given, the energy equation is not solved and T is interpolated from
+    #: this profile onto the grid, as Cantera's ``set_fixed_temp_profile``
+    #: with ``energy_enabled = False``. Its end values should match ``Tu`` and
+    #: *wallTemperature*.
+    temperatureProfile = Option(None)
+
+
 class Times(Options):
     """
     Paremeters controlling integrator timesteps and frequency of
@@ -1065,16 +1115,23 @@ class TerminationCondition(Options):
 
     - If `measurement == 'dTdt'`, integration will terminate when
       `||1/T * dT/dt|| / sqrt(nPoints)`  is less than *dTdtTol*.
+
+    - If `measurement == 'moments'`, integration will terminate when, for
+      every particle moment M, `||dM/dt|| / sqrt(nPoints) / max|M|` is less
+      than *momentsTol* [1/s]. Requires particles (``Particles.nMoments`` >
+      0); useful when the temperature is prescribed (dT/dt = 0) or the
+      particle fields settle more slowly than the flame.
     """
 
     tEnd = FloatOption(0.8)  #:
 
-    measurement = Option("Q", (None,'dTdt'))  #:
+    measurement = Option("Q", (None,'dTdt','moments'))  #:
     tolerance = FloatOption(1e-4, level=2)  #:
     abstol = FloatOption(0.5, min=0, level=2)  #:
     steadyPeriod = FloatOption(0.002, min=0, level=1)  #:
     tMin = FloatOption(0.0, level=1) #:
     dTdtTol = FloatOption(10.0) #:
+    momentsTol = FloatOption(1.0) #:
 
 
 class Config(object):
@@ -1106,6 +1163,7 @@ class Config(object):
         self.externalHeatFlux = get(ExternalHeatFlux)
         self.strainParameters = get(StrainParameters)
         self.positionControl = opts.get('PositionControl')
+        self.impingingJet = opts.get('ImpingingJet')
         self.times = get(Times)
         self.cvodeTolerances = get(CvodeTolerances)
         self.qssTolerances = get(QssTolerances)
@@ -1153,6 +1211,27 @@ class Config(object):
         if cylindricalFlame and discFlame:
             error = True
             print("Error: 'discFlame' and 'cylindricalFlame' are mutually exclusive.")
+
+        # Impinging jet: single premixed inlet at x = 0, wall on the right
+        if self.impingingJet is not None:
+            if (self.initialCondition.flameType != 'premixed' or
+                not self.general.unburnedLeft or self.general.twinFlame or
+                cylindricalFlame or self.positionControl is not None):
+                error = True
+                print("Error: ImpingingJet requires a premixed flame with"
+                      " 'unburnedLeft', 'planar' or 'disc' geometry, and no"
+                      " 'twinFlame' or PositionControl.")
+            if (self.impingingJet.massFlux.value is not None and
+                self.strainParameters.function.value is not None):
+                error = True
+                print("Error: ImpingingJet.massFlux cannot be combined with"
+                      " StrainParameters.function.")
+
+        if (self.terminationCondition.measurement == 'moments' and
+            self.particles.nMoments.value == 0):
+            error = True
+            print("Error: TerminationCondition measurement 'moments' requires"
+                  " particles (Particles.nMoments > 0).")
 
         # the "fuelLeft" option only makes sense for diffusion flames
         if (self.initialCondition.flameType == 'premixed' and
@@ -1399,7 +1478,11 @@ class ConcreteConfig(_ember.ConfigOptions):
             if self.general.unburnedLeft:
                 T[0] = IC.Tu
                 Y[:,0] = Yu
-                if V is None or V[-1] < 0:
+                if self.impingingJet is not None:
+                    T[-1] = self.impingingJet.wallTemperature
+                    if V is None:
+                        Y[:,-1] = Yb
+                elif V is None or V[-1] < 0:
                     T[-1] = Tb
                     Y[:,-1] = Yb
             else:
@@ -1447,7 +1530,8 @@ class ConcreteConfig(_ember.ConfigOptions):
         N = IC.nPoints
         gas = self.gas
 
-        xLeft = (0.0 if self.general.twinFlame or self.general.flameGeometry == 'cylindrical'
+        xLeft = (0.0 if (self.general.twinFlame or self.impingingJet is not None or
+                         self.general.flameGeometry == 'cylindrical')
                  else IC.xLeft)
 
         x = np.linspace(xLeft, IC.xRight, N)
@@ -1528,10 +1612,19 @@ class ConcreteConfig(_ember.ConfigOptions):
             rho[j] = gas.density
             U[j] = a0 / beta * np.sqrt(rhou/rho[j])
 
+        if self.impingingJet is not None:
+            # Plug flow at the inlet and no slip at the wall
+            U[0] = U[-1] = 0
         for _ in range(2):
             utils.smooth(U)
 
-        if self.general.twinFlame or self.general.flameGeometry == 'cylindrical':
+        if self.impingingJet is not None:
+            # No flow through the wall
+            V[-1] = 0
+            for j in range(N-2, -1, -1):
+                V[j] = V[j+1] + beta * rho[j]*U[j]*(x[j+1] - x[j])
+
+        elif self.general.twinFlame or self.general.flameGeometry == 'cylindrical':
             # Stagnation point at x = 0
             V[0] = 0
             for j in range(1, N):

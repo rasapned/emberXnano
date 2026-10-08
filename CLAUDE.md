@@ -186,6 +186,57 @@ species), so they are **mass-specific** quantities, not raw densities:
   large diffusivities there with suspicion; likely a mass/`N` noise artifact
   rather than real physics.
 
+## Impinging jet (`ImpingingJet` option)
+
+Counterpart of Cantera's `ImpingingJet` (Inlet1D + AxisymmetricFlow +
+Surface1D), for `flameGeometry` `'disc'` (= Cantera) or `'planar'`, premixed
+only. Example/validation: `python/ember/examples/example_impingingJet.py`.
+- Fixed domain `[0, xRight]` (xLeft forced to 0): boundary regridding is
+  skipped in `flameSolver.cpp` (same branch as quasi2d); interior adaptation
+  still runs.
+- Left = `BoundaryCondition::InletFlux` (burner-style flux balance for Y and
+  moments, T fixed) plus U = 0 (plug flow). Right =
+  `BoundaryCondition::Wall`: T = `wallTemperature`, U = 0, V = 0, zero-flux
+  half control volume for Y/moments in `diffusionSystem.cpp` (T and U rows are
+  overridden to FixedValue in `prepareIntegrators`), conservative wall term for
+  the jCorr/Soret cross fluxes, and no chemistry at the wall node (as at the
+  inlet). Particles: zero flux at the wall (no deposition/thermophoresis).
+- Continuity is integrated from the wall (`ContinuityBoundaryCondition::Wall`,
+  `rV[jj] = 0`), so the inlet mass flux `V[0]` is an output.
+- Pressure curvature: Cantera solves for Λ; ember prescribes it through the
+  strain rate, `Λ = -rhou·a²/β²` (so `a = β·sqrt(-Λ/rhou)` maps a Cantera
+  solution to ember). With `ImpingingJet(massFlux=...)` a PI controller on
+  log(a) (`FlameSolver::updateMassFluxControl`, `ControlledFunction` in
+  `scalarFunction.h`) adjusts `a` until `V[0]` matches — steady state only,
+  transients are not physical. `a` and `mdot` are in `out.h5`.
+- The thin plug-flow layer at the inlet limits the split timestep: the default
+  `globalTimestep = 2e-5` gave NaNs at a ≈ 900 1/s, 1 atm; 1e-5 was stable
+  (2e-5 is fine at 3000 Pa, `single_Igor_impingingJet.py`).
+- Use `splittingMethod='balanced'` (default) for steady comparisons: with
+  `'strang'` the Igor case converged to an `a` 7.6% above Cantera's; balanced
+  matched it to 0.02%.
+- Prescribed temperature (`ImpingingJet(temperatureProfile=(x, T))`, Cantera's
+  `set_fixed_temp_profile` + `energy_enabled = False`): `options.fixedTemperature`
+  resets T to the interpolated profile in `setupStep` and zeroes dT/dt in all
+  operators (convection UTW, source systems, energy diffusion B = 0, cross
+  term, energy ddt rows). Example: `single_Igor_impingingJet_fixedT.py`
+  (measured profile `T_of_x-L500.csv`, ember started from Cantera's solution).
+  With T prescribed, `TerminationCondition(measurement='dTdt')` is meaningless
+  (stops at tMin); use `measurement='moments'` (`momentsTol` [1/s]: RMS rate
+  of every particle moment relative to its peak, `checkTerminationCondition`)
+  for particle cases, e.g. `single_Igor_impingingJet_fixedT_particles.py`.
+- Starting from given profiles (`haveProfiles=True`) the inlet stream
+  composition `Yleft` is taken from `Y[:, 0]`; overwrite that point with the
+  supplied mixture, since a converged burner/jet inlet node is depleted in
+  fast diffusers (H2).
+- `InletFlux` with the flame on the burner (strong back-diffusion through the
+  inlet face) needed two conservation fixes, which also apply to burner
+  flames: the UTW system's Wmx[0] now gets the inflow term (otherwise rho[0],
+  hence the inlet velocity used by the species, drifted within each step and
+  ~2.5% of the H atoms were lost), and the jCorr/Soret cross flux across the
+  first face is credited to node 0. Check with an element balance: inflow
+  `mdot*Z_in` vs radial outflow `∫ β·rho·U·Z dx`.
+
 ## Working conventions
 
 - Commit/push only when explicitly asked; this session's git user is

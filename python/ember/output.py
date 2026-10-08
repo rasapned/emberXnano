@@ -42,6 +42,7 @@ class TimeSeriesWriter(object):
         self.xFlame = []
         self.a = []
         self.dadt = []
+        self.mdot = []
 
     def __call__(self, name, flag=1):
         if not self.t or self.solver.tNow != self.t[-1]:
@@ -52,6 +53,7 @@ class TimeSeriesWriter(object):
             self.xFlame.append(self.solver.flamePosition)
             self.a.append(self.solver.a)
             self.dadt.append(self.solver.dadt)
+            self.mdot.append(self.solver.V[0])
 
         if flag:
             filename = '{}/{}.{}'.format(self.options.paths.outputDir, name,
@@ -67,6 +69,7 @@ class TimeSeriesWriter(object):
                 data['xFlame'] = self.xFlame
                 data['a'] = self.a
                 data['dadt'] = self.dadt
+                data['mdot'] = self.mdot
 
 
 class StateWriter(object):

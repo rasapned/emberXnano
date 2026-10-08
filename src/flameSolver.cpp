@@ -55,6 +55,14 @@ void FlameSolver::initialize(void)
     flamePosIntegralError = 0;
     terminationCondition = 1e10;
 
+    if (options.massFluxControl) {
+        // a(t) is set by updateMassFluxControl(), starting from the initial
+        // strain rate
+        delete strainfunc;
+        strainfunc = new ControlledFunction(options.strainRateInitial);
+    }
+    massFluxIntegralError = 0;
+
     // Cantera initialization
     gas.initialize();
     nSpec = gas.nSpec;
@@ -111,6 +119,7 @@ void FlameSolver::initialize(void)
     resizeAuxiliary();
 
     tFlamePrev = t;
+    tMassFluxPrev = t;
     tNow = t;
 
     totalTimer.start();
@@ -155,6 +164,19 @@ void FlameSolver::setupStep()
         if (nMoments > 0) {
             moments.col(jj) = momentsRight;
         }
+    } else if (grid.rightBC == BoundaryCondition::Wall) {
+        // Impinging jet: wall temperature and no slip are prescribed;
+        // species and moments at the wall follow from the zero-flux balance.
+        // The inlet velocity is plug flow (U = 0), as in Cantera.
+        T(jj) = Tright;
+        U(jj) = 0;
+        U(0) = 0;
+    }
+
+    if (options.fixedTemperature) {
+        // Prescribed temperature profile (energy equation not solved),
+        // interpolated onto the current grid
+        T = mathUtils::interp1(options.Tfixed_x, options.Tfixed_T, x, false);
     }
 
     updateChemicalProperties();
@@ -162,6 +184,9 @@ void FlameSolver::setupStep()
     updateBC();
     if (options.xFlameControl) {
         update_xStag(t, true); // calculate the value of rVzero
+    }
+    if (options.massFluxControl) {
+        updateMassFluxControl(t);
     }
     convectionSystem.set_rVzero(rVzero);
     setupTimer.stop();
@@ -231,6 +256,19 @@ void FlameSolver::prepareIntegrators()
         diffusionTerms[kEnergy].grid.leftBC = BoundaryCondition::FixedValue;
     }
 
+    // Prescribed temperature profile: no heat conduction
+    if (options.fixedTemperature) {
+        diffusionTerms[kEnergy].B.setZero(nPoints);
+    }
+
+    // Impinging jet: T and U are prescribed at the wall and U at the inlet;
+    // species and moments keep the zero-flux Wall stencil.
+    if (grid.rightBC == BoundaryCondition::Wall) {
+        diffusionTerms[kEnergy].grid.rightBC = BoundaryCondition::FixedValue;
+        diffusionTerms[kMomentum].grid.rightBC = BoundaryCondition::FixedValue;
+        diffusionTerms[kMomentum].grid.leftBC = BoundaryCondition::FixedValue;
+    }
+
     setDiffusionSolverState(tNow);
     for (size_t i=0; i<nVars; i++) {
         diffusionTerms[i].splitConst = splitConstDiff.row(i);
@@ -274,6 +312,29 @@ int FlameSolver::finishStep()
         ddtDiff(kEnergy, 0) = 0;
         ddtProd(kEnergy, 0) = 0;
         ddtCross(kEnergy, 0) = 0;
+    }
+
+    // Impinging jet: the same holds for the prescribed U at both ends and
+    // the wall temperature.
+    if (grid.rightBC == BoundaryCondition::Wall) {
+        ddtConv(kMomentum, 0) = 0;
+        ddtDiff(kMomentum, 0) = 0;
+        ddtProd(kMomentum, 0) = 0;
+        ddtConv(kMomentum, jj) = 0;
+        ddtDiff(kMomentum, jj) = 0;
+        ddtProd(kMomentum, jj) = 0;
+        ddtConv(kEnergy, jj) = 0;
+        ddtDiff(kEnergy, jj) = 0;
+        ddtProd(kEnergy, jj) = 0;
+        ddtCross(kEnergy, jj) = 0;
+    }
+
+    // Prescribed temperature profile: T has no rate of change anywhere
+    if (options.fixedTemperature) {
+        ddtConv.row(kEnergy).setZero();
+        ddtDiff.row(kEnergy).setZero();
+        ddtProd.row(kEnergy).setZero();
+        ddtCross.row(kEnergy).setZero();
     }
 
     // *** End of Strang-split integration step ***
@@ -368,7 +429,7 @@ int FlameSolver::finishStep()
         rollVectorVector(currentSolution, ddtProd);
 
         grid.nAdapt = nVars;
-        if (options.quasi2d) {
+        if (options.quasi2d || options.impingingJet) {
             // do not change grid extents in this case
         } else if (strainfunc->a(tNow) == 0) {
             calculateQdot();
@@ -475,6 +536,25 @@ bool FlameSolver::checkTerminationCondition(void)
         if (value < options.termination_dTdtTol) {
             logFile.write("Terminating integration: "
                     "dTdt variation less than specified threshold.");
+            return true;
+        }
+    } else if (options.terminationMeasurement == "moments") {
+        // Slowest particle moment: RMS rate of change relative to the
+        // moment's peak value. Not converged while a moment is still zero.
+        dmatrix ddt = ddtDiff + ddtConv + ddtProd + ddtCross;
+        double value = 0;
+        for (size_t m=0; m<nMoments; m++) {
+            double peak = moments.row(m).abs().maxCoeff();
+            double rms = ddt.row(kMoments+m).matrix().norm() /
+                sqrt(static_cast<double>(nPoints));
+            value = (peak > 0) ? std::max(value, rms / peak) : INFINITY;
+        }
+        logFile.write(format(
+            "max ||dM/dt|| / max|M| = %9.3e. Termination threshold = %9.3e") %
+            value % options.termination_momentsTol);
+        if (value < options.termination_momentsTol) {
+            logFile.write("Terminating integration: "
+                    "particle moment variation less than specified threshold.");
             return true;
         }
     }
@@ -585,6 +665,7 @@ void FlameSolver::resizeAuxiliary()
     convectionSystem.setLeftBC(Tleft, Yleft, momentsLeft);
 
     convectionSystem.utwSystem.setStrainFunction(strainfunc);
+    convectionSystem.utwSystem.fixedTemperature = options.fixedTemperature;
     convectionSystem.utwSystem.setRhou(rhou);
 
     if (options.quasi2d) {
@@ -669,8 +750,32 @@ void FlameSolver::updateCrossTerms()
                 (jFick(k,j) + jSoret(k,j) + 0.5 * (Y(k,j) + Y(k,j+1)) * jCorr[j]);
         }
         double dTdx = cfm[j] * T(j-1) + cf[j] * T(j) + cfp[j] * T(j+1);
-        if (!options.quasi2d) {
+        if (!options.quasi2d && !options.fixedTemperature) {
             dTdtCross[j] = - 0.5 * (sumcpj[j] + sumcpj[j-1]) * dTdx / (cp[j] * rho[j]);
+        }
+    }
+
+    // Burner / impinging jet inlet: the control volume at j = 0 (as in the
+    // InletFlux diffusion stencil) receives what leaves j = 1 across the face
+    // between them, with no diffusive flux through x[0]. Without this the
+    // correction flux leaving j = 1 toward the inlet is lost, which matters
+    // when the flame sits on the burner (steep H2 gradient at the face).
+    if (grid.leftBC == BoundaryCondition::InletFlux) {
+        double c0 = (grid.alpha + 1) / (rho[0] * hh[0]);
+        for (size_t k=0; k<nSpec; k++) {
+            dYdtCross(k,0) = -c0 *
+                (0.5 * (Y(k,0) + Y(k,1)) * jCorr[0] + jSoret(k,0));
+        }
+    }
+
+    // Impinging jet wall: the half control volume at jj receives what
+    // leaves j = jj-1 across the face between them (none leaves through the
+    // wall), so that these fluxes are conserved like the Fickian ones.
+    if (grid.rightBC == BoundaryCondition::Wall) {
+        double c0 = 1 / (r[jj] * rho[jj] * 0.5 * hh[jj-1]);
+        for (size_t k=0; k<nSpec; k++) {
+            dYdtCross(k,jj) = c0 * rphalf[jj-1] *
+                (0.5 * (Y(k,jj-1) + Y(k,jj)) * jCorr[jj-1] + jSoret(k,jj-1));
         }
     }
 
@@ -683,7 +788,11 @@ void FlameSolver::updateBC()
     BoundaryCondition::BC leftPrev = grid.leftBC;
     BoundaryCondition::BC rightPrev = grid.rightBC;
 
-    if (options.wallFlux && x[0] >= 0.0 && x[0] <= options.centerGridMin) {
+    if (options.impingingJet) {
+        // Fixed domain: premixed inlet at x = 0 with the burner-style flux
+        // balance (Cantera's Inlet1D), see BoundaryCondition::InletFlux
+        grid.leftBC = BoundaryCondition::InletFlux;
+    } else if (options.wallFlux && x[0] >= 0.0 && x[0] <= options.centerGridMin) {
         grid.leftBC = BoundaryCondition::WallFlux;
     } else if (grid.ju == 0 &&
                options.continuityBC == ContinuityBoundaryCondition::Left &&
@@ -704,7 +813,9 @@ void FlameSolver::updateBC()
         grid.leftBC = BoundaryCondition::ZeroGradient;
     }
     
-    if (options.flameType == "premixed" && grid.jb == jj && !grid.fixedBurnedVal) {
+    if (options.impingingJet) {
+        grid.rightBC = BoundaryCondition::Wall;
+    } else if (options.flameType == "premixed" && grid.jb == jj && !grid.fixedBurnedVal) {
         grid.rightBC = BoundaryCondition::Floating;
     } else {
         grid.rightBC = BoundaryCondition::FixedValue;
@@ -884,16 +995,18 @@ void FlameSolver::integrateProductionTerms(size_t j1, size_t j2)
 
     int err = 0;
     for (size_t j=j1; j<j2; j++) {
-        if (j == 0 && grid.leftBC == BoundaryCondition::InletFlux) {
+        if ((j == 0 && grid.leftBC == BoundaryCondition::InletFlux) ||
+            (j == jj && grid.rightBC == BoundaryCondition::Wall)) {
             // Burner face: no chemistry, as in Cantera's burner boundary. T is
             // held at Tleft, and species/moments are set only by the inlet
             // flux balance. Letting chemistry run here (with T free inside
             // the stage and Y never reset) turns the face into an igniter.
+            // Likewise at an inert wall (Cantera's Surface1D).
             double dtStage = tStageEnd - tStageStart;
-            U(0) += splitConstProd(kMomentum, 0) * dtStage;
-            Y.col(0) += splitConstProd.col(0).segment(kSpecies, nSpec) * dtStage;
+            U(j) += splitConstProd(kMomentum, j) * dtStage;
+            Y.col(j) += splitConstProd.col(j).segment(kSpecies, nSpec) * dtStage;
             if (nMoments > 0) {
-                moments.col(0) += splitConstProd.col(0).segment(kMoments, nMoments) * dtStage;
+                moments.col(j) += splitConstProd.col(j).segment(kMoments, nMoments) * dtStage;
             }
             continue;
         }
@@ -1040,6 +1153,28 @@ void FlameSolver::update_xStag(const double t, const bool updateIntError)
 }
 
 
+void FlameSolver::updateMassFluxControl(const double t)
+{
+    // Inlet mass flux from the latest evaluation of the continuity equation,
+    // which is integrated from the wall (V = rV for planar and disc flames)
+    double mdot = convectionSystem.utwSystem.V[0];
+    double error = (options.massFluxTarget - mdot) / options.massFluxTarget;
+    massFluxIntegralError += error * (t - tMassFluxPrev);
+    tMassFluxPrev = t;
+
+    // The mass flux scales roughly linearly with a, so the controller acts
+    // on log(a); this also keeps a positive.
+    double a = options.strainRateInitial *
+        exp(options.massFluxProportionalGain * error +
+            options.massFluxIntegralGain * massFluxIntegralError);
+    static_cast<ControlledFunction*>(strainfunc)->value = a;
+
+    if (debugParameters::debugFlameRadiusControl) {
+        logFile.write(format("massFluxControl: mdot=%g;  a=%g;  error=%g;  I=%g") %
+                      mdot % a % error % massFluxIntegralError);
+    }
+}
+
 double FlameSolver::targetFlamePosition(double t)
 {
     if (t <= options.xFlameT0) {
@@ -1070,6 +1205,10 @@ void FlameSolver::calculateQdot()
     if (grid.leftBC == BoundaryCondition::InletFlux) {
         wDot.col(0).setZero();
         qDot[0] = 0;
+    }
+    if (grid.rightBC == BoundaryCondition::Wall) {
+        wDot.col(jj).setZero();
+        qDot[jj] = 0;
     }
     reactionRatesTimer.stop();
 }
@@ -1211,6 +1350,10 @@ void FlameSolver::loadProfile(void)
 
     } else {
         throw DebugException("Invalid flameType: " + options.flameType);
+    }
+
+    if (options.impingingJet) {
+        Tright = options.wallTemperature;
     }
 
     updateBC();

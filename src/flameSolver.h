@@ -169,6 +169,8 @@ public:
     double tFlamePrev, tFlameNext;
     double xFlameTarget, xFlameActual;
     double flamePosIntegralError;
+    double tMassFluxPrev; //!< time of the last mass flux controller update
+    double massFluxIntegralError; //!< integral of the relative mass flux error [s]
 
     //! Cantera data
     CanteraGas gas;
@@ -182,6 +184,10 @@ public:
 
     void update_xStag(const double t, const bool updateIntError);
     double targetFlamePosition(double t); //!< [m]
+
+    //! Impinging jet: set the strain rate (pressure curvature term) by PI
+    //! control so that the inlet mass flux approaches the target value.
+    void updateMassFluxControl(const double t);
 
     void printPerformanceStats(void);
     void printPerfString(std::ostream& stats, const std::string& label, const PerfTimer& T);

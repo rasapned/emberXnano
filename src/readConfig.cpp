@@ -13,6 +13,8 @@ void ConfigOptions::setContinuityBC(const std::string& condition)
         continuityBC = ContinuityBoundaryCondition::Temp;
     } else if (condition == "stagnationPoint") {
         continuityBC = ContinuityBoundaryCondition::Zero;
+    } else if (condition == "wall") {
+        continuityBC = ContinuityBoundaryCondition::Wall;
     }
 }
 

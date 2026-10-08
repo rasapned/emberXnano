@@ -298,6 +298,28 @@ cdef class ConfigOptions:
             opts.xStagControl = False
             opts.xFlameControl = False
 
+        # Impinging jet: inlet at x = 0, wall at the right end of a fixed domain
+        if self.impingingJet is not None:
+            IJ = self.impingingJet
+            opts.impingingJet = True
+            opts.wallTemperature = IJ.wallTemperature
+            opts.fixedLeftLoc = True
+            opts.setContinuityBC(stringify('wall'))
+            opts.massFluxControl = IJ.massFlux is not None
+            opts.massFluxTarget = IJ.massFlux or 0.0
+            opts.massFluxProportionalGain = IJ.proportionalGain
+            opts.massFluxIntegralGain = IJ.integralGain
+            opts.fixedTemperature = IJ.temperatureProfile is not None
+            if opts.fixedTemperature:
+                data = np.ascontiguousarray(IJ.temperatureProfile[0], dtype=float)
+                opts.Tfixed_x = map_vector(&data[0], len(data), 1)
+                data = np.ascontiguousarray(IJ.temperatureProfile[1], dtype=float)
+                opts.Tfixed_T = map_vector(&data[0], len(data), 1)
+        else:
+            opts.impingingJet = False
+            opts.massFluxControl = False
+            opts.fixedTemperature = False
+
         # Grid
         opts.centerGridMin = self.grid.centerGridMin
         opts.vtol = self.grid.vtol
@@ -509,6 +531,7 @@ cdef class ConfigOptions:
             opts.terminationTolerance = TC.tolerance
             opts.terminationAbsTol = TC.abstol
             opts.termination_dTdtTol = TC.dTdtTol
+            opts.termination_momentsTol = TC.momentsTol
 
 
 cdef np.ndarray[np.double_t, ndim=1] chebyshev1(double x, int N):

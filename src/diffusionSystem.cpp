@@ -59,6 +59,16 @@ void DiffusionSystem::get_A(dvec& a, dvec& b, dvec& c)
     size_t jStop;
     if (grid.rightBC == BoundaryCondition::FixedValue) {
         jStop = N-1;
+        // Clear coefficients left over if this system used a flux BC before
+        a[N-1] = 0;
+        b[N-1] = 0;
+    } else if (grid.rightBC == BoundaryCondition::Wall) {
+        // Zero-flux wall: half control volume from x[N-3/2] to x[N-1], whose
+        // only flux is across the face shared (via c2[N-2]) with row N-2
+        jStop = N-1;
+        double c0 = B[N-1] * c2[N-2] / (r[N-1] * hh[N-2]);
+        a[N-1] = c0;
+        b[N-1] = -c0;
     } else { // (rightBC == BoundaryCondition::ZeroGradient)
         // In the case of a zero gradient boundary condition, the boundary value
         // is not computed, and the value one point in is computed by substituting

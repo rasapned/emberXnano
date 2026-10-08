@@ -106,6 +106,7 @@ cdef extern from "readConfig.h":
         string terminationMeasurement
         double terminationTolerance, terminationAbsTol, terminationPeriod
         double termination_dTdtTol
+        double termination_momentsTol
 
         int errorStopCount
         cbool stopIfError
@@ -148,6 +149,13 @@ cdef extern from "readConfig.h":
 
         cbool xStagControl
         double xStag
+
+        cbool impingingJet
+        double wallTemperature
+        cbool fixedTemperature
+        CxxEigenVec Tfixed_x, Tfixed_T
+        cbool massFluxControl
+        double massFluxTarget, massFluxProportionalGain, massFluxIntegralGain
 
 
 cdef extern from "debugUtils.h":

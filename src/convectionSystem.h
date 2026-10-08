@@ -92,6 +92,9 @@ public:
     double rhou; //!< density of the unburned gas
     void setRhou(double _rhou) { rhou = _rhou; }
 
+    //! True if T is prescribed (energy equation not solved): dT/dt = 0
+    bool fixedTemperature;
+
 private:
     void V2rV(); //!< compute #rV from #V
     void rV2V(); //!< compute #V from #rV

@@ -29,7 +29,13 @@ namespace BoundaryCondition {
      InletFlux,
 
      //! Outflow boundary condition
-     Floating
+     Floating,
+
+     //! Impermeable, no-slip wall at `j = jj` (impinging jet), as in
+     //! Cantera's Surface1D: V = 0, U = 0 and T fixed (the solver overrides
+     //! the energy and momentum rows to #FixedValue); species and moments
+     //! see a zero-flux half control volume from x[jj-1/2] to x[jj].
+     Wall
     };
 }
 

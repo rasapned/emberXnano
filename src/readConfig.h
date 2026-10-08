@@ -25,7 +25,8 @@ namespace ContinuityBoundaryCondition {
         Right, //!< V is computed from j = jj
         Zero, //!< V = 0 at x = 0
         Qdot, //!< V is calculated from the location of maximum heat release rate
-        Temp //!< V is calculated from the temperature midpoint
+        Temp, //!< V is calculated from the temperature midpoint
+        Wall //!< V = 0 at j = jj (impermeable wall; impinging jet)
     };
 }
 
@@ -202,6 +203,10 @@ public:
     //! [terminationCondition.dTdtTol]
     double termination_dTdtTol;
 
+    //! tolerance [1/s] for termination when measurement == `moments`
+    //! [terminationCondition.momentsTol]
+    double termination_momentsTol;
+
     //! period over which to require constant heat release rate
     //! [terminationCondition.steadyPeriod]
     double terminationPeriod;
@@ -222,6 +227,24 @@ public:
 
     bool xStagControl;
     double xStag;
+
+    // Impinging jet: premixed inlet at x = 0, impermeable no-slip wall at
+    // the right end of a fixed domain [see input.py ImpingingJet]
+    bool impingingJet; //!< True if an ImpingingJet section is given
+    double wallTemperature; //!< [impingingJet.wallTemperature]
+
+    //! True if the temperature is prescribed as T(x) (Tfixed_T at positions
+    //! Tfixed_x) instead of being solved for [impingingJet.temperatureProfile]
+    bool fixedTemperature;
+    dvec Tfixed_x; //!< positions of the prescribed temperature profile [m]
+    dvec Tfixed_T; //!< prescribed temperature profile [K]
+
+    //! True if the strain rate a(t) (i.e. the pressure curvature term) is set
+    //! by a feedback controller to reach #massFluxTarget at the inlet
+    bool massFluxControl;
+    double massFluxTarget; //!< [impingingJet.massFlux] [kg/m^2*s]
+    double massFluxProportionalGain; //!< [impingingJet.proportionalGain]
+    double massFluxIntegralGain; //!< [impingingJet.integralGain] [1/s]
 
     // NEW! Particles: particle moment (passive scalar) transport [see input.py Particles]
     int nMoments; //!< [particles.nMoments] Number of particle moment scalars

@@ -64,6 +64,19 @@ private:
     dvec coeffs;
 };
 
+//! A function held constant between updates of #value. Used when a(t) is set
+//! by a feedback controller (impinging jet mass flux control) instead of
+//! being prescribed.
+class ControlledFunction : public ScalarFunction
+{
+public:
+    explicit ControlledFunction(double a0) : value(a0) {}
+    virtual double a(double t) const { return value; }
+    virtual double dadt(double t) const { return 0; }
+
+    double value;
+};
+
 //! Create a new function of `type` with additional options specified in
 //! `options`.
 ScalarFunction* newScalarFunction(const std::string& type,

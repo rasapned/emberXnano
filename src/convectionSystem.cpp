@@ -7,6 +7,7 @@ ConvectionSystemUTW::ConvectionSystemUTW()
     : gas(NULL)
     , continuityBC(ContinuityBoundaryCondition::Left)
     , jContBC(0)
+    , fixedTemperature(false)
     , nVars(3)
 {
 }
@@ -54,6 +55,13 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
                 rV[j-1] = rV[j] + hh[j-1] * rphalf[j-1] * (drhodt[j-1] + rho[j-1] * beta * U[j-1]);
             }
         }
+    } else if (continuityBC == ContinuityBoundaryCondition::Wall) {
+        // Impermeable wall at j = jj; the inlet mass flux rV[0] follows.
+        // Same quadrature as the Left case, solved for rV[j] instead.
+        rV[jj] = 0;
+        for (size_t j=jj; j>0; j--) {
+            rV[j-1] = rV[j] + hh[j-1] * rphalf[j-1] * (drhodt[j-1] + rho[j-1] * beta * U[j-1]);
+        }
     } else {
         if (continuityBC == ContinuityBoundaryCondition::Temp) {
             size_t j = jContBC;
@@ -96,6 +104,11 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
     // ControlVolume case. Zero-gradient condition for U is handled in diffusion
     // term.
     dUdt[0] = splitConstU[0] - U[0]*U[0] + rhou/rho[0]*(dadt/beta + a*a/(beta*beta));
+    if (grid.rightBC == BoundaryCondition::Wall) {
+        // Impinging jet: plug-flow inlet, U(0) is held fixed (as V0 in
+        // Cantera's Inlet1D)
+        dUdt[0] = 0;
+    }
 
     if (grid.leftBC == BoundaryCondition::ControlVolume ||
         grid.leftBC == BoundaryCondition::WallFlux)
@@ -105,6 +118,19 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
 
         dTdt[0] = -rVzero_mod * (T[0] - Tleft) / (rho[0] * centerVol) + splitConstT[0];
         dWdt[0] = -rVzero_mod * (Wmx[0] - Wleft) / (rho[0] * centerVol) - Wmx[0] * Wmx[0] * splitConstW[0];
+
+    } else if (grid.leftBC == BoundaryCondition::InletFlux) {
+        // T is held at Tleft, but Wmx must see the inflow that the species
+        // get in ConvectionSystemY. Otherwise strong diffusion through the
+        // inlet face (flame on the burner) makes Wmx[0], and so rho[0], drift
+        // within the step, the species see a too small inlet velocity, and
+        // part of the inflow is the depleted node mixture instead of Yleft.
+        // Exact form of -W^2 * sum_k (dYk/dt)/Wk for that inflow term.
+        double centerVol = pow(x[1],alpha+1) / (alpha+1);
+        double rVzero_mod = std::max(rV[0], 0.0);
+        dTdt[0] = splitConstT[0];
+        dWdt[0] = rVzero_mod / (rho[0] * centerVol) * Wmx[0] * (Wleft - Wmx[0]) / Wleft
+                  - Wmx[0] * Wmx[0] * splitConstW[0];
 
     } else { // FixedValue or ZeroGradient
         dTdt[0] = splitConstT[0];
@@ -127,12 +153,21 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
                    + rhou/rho[jj]*(dadt/beta + a*a/(beta*beta));
         dTdt[jj] = splitConstT[jj];
         dWdt[jj] = -Wmx[jj] * Wmx[jj] * splitConstW[jj];
+    } else if (grid.rightBC == BoundaryCondition::Wall) {
+        // No flow through the wall, and no slip: U(jj) is held at zero
+        dUdt[jj] = 0;
+        dTdt[jj] = splitConstT[jj];
+        dWdt[jj] = -Wmx[jj] * Wmx[jj] * splitConstW[jj];
     } else {
         // Outflow  at the boundary
         dUdt[jj] = splitConstU[jj] - V[jj] * (U[jj]-U[jj-1])/hh[jj-1]/rho[jj]
                    -U[jj]*U[jj] + rhou/rho[jj]*(dadt/beta + a*a/(beta*beta));
         dTdt[jj] = splitConstT[jj] - V[jj] * (T[jj]-T[jj-1])/hh[jj-1]/rho[jj];
         dWdt[jj] = - Wmx[jj] * Wmx[jj] * splitConstW[jj] - V[jj] * (Wmx[jj]-Wmx[jj-1])/hh[jj-1]/rho[jj];
+    }
+
+    if (fixedTemperature) {
+        dTdt.setZero();
     }
 
     roll_ydot(ydot);
@@ -218,6 +253,7 @@ void ConvectionSystemUTW::updateContinuityBoundaryCondition
         break;
 
     case ContinuityBoundaryCondition::Right:
+    case ContinuityBoundaryCondition::Wall:
         jContBC = jj;
         break;
 
