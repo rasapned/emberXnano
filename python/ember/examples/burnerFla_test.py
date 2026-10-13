@@ -39,7 +39,7 @@ import cantera as ct
 output = 'run/burnerFla'
 
 # Same reactant composition as single_Igor_nucl.py
-X_FEC5O5 = 0.0005
+X_FEC5O5 = 0.0003
 VS_total = 400 + 400 + 600
 VS_total /= (1 - X_FEC5O5)
 X_H2 = 400 / VS_total
@@ -49,7 +49,7 @@ react = f"H2:{X_H2:.8e}, AR:{X_AR:.8e}, FEC5O5:{X_FEC5O5:.8e}, O2:{X_O2:.8e}"
 print("Reactants:", react)
 
 #mechanism = 'Iron_elte_Syngas-newTransp.yaml'
-mechanism = 'opt-compact-mech-OF2.yaml'
+mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
 pressure = 3000.0
 Tu = 300.0
 u_in = 1.1
@@ -107,7 +107,7 @@ if initMode == 'shifted':
 elif initMode == 'tanh':
     output += '_tanh'
 # Converged run to compare the other starts against in the plots below
-referenceOutput = 'run/burnerFla_canteraInit'
+referenceOutput = 'run/burnerFla'
 
 if initMode in ('cantera', 'shifted'):
     shift = initShift if initMode == 'shifted' else 0.0
@@ -188,7 +188,7 @@ conf = Config(
               transportModel='Mix'),
     General(twinFlame=False,
             flameGeometry='planar',
-            nThreads=1,
+            nThreads=16,
             chemistryIntegrator='cvode',
             splittingMethod='balanced',
             continuityBC='fixedLeft',
@@ -244,7 +244,7 @@ conf = Config(
         # 'dTdt' checks whether the temperature FIELD itself is still
         # changing anywhere in space, which is what we actually care about.
         measurement='dTdt',
-        dTdtTol=1.0,        # tightened from default 10.0 [1/s]
+        dTdtTol=0.03,        # tightened from default 10.0 [1/s]
         tMin=0.025,          # let the initial-guess transient clear first; 0.02
                             # stopped the tanh-start run mid-transient
         tEnd=0.2,           # generous headroom; previous run needed >0.012s
@@ -260,7 +260,7 @@ conf = Config(
     Times(tStart=tStart),
     OutputFiles(firstFileNumber=firstFileNumber,
                 debugIntegratorStages=False),
-    Debug(startTime=0.0043, stopTime=0.0046),
+    #Debug(startTime=0.0043, stopTime=0.0046),
 )
 
 if __name__ == '__main__':

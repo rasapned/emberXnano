@@ -249,7 +249,7 @@ conf = Config(
 )
 
 if __name__ == '__main__':
-    conf.run()
+    #conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 
@@ -376,6 +376,7 @@ if __name__ == '__main__':
         ax.legend(loc='best', fontsize=8)
     for ax in axes[-1, :]:
         ax.set_xlabel('Position [m]')
+    ax.set_xlim(0,0.1)
     fig.suptitle('Ember (with particles) vs Cantera BurnerFlame')
     fig.tight_layout()
     fig.savefig(output + '/Particles_overview.png')

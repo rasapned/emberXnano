@@ -183,7 +183,7 @@ conf = Config(
     # over the grid, relative to its peak) per second. tMin lets nucleation
     # build the particle fields up from zero first.
     TerminationCondition(measurement='moments',
-                         momentsTol=0.1,
+                         momentsTol=1,
                          tMin=0.02,
                          tEnd=0.5),
     Particles(

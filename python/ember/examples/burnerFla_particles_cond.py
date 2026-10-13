@@ -191,7 +191,7 @@ conf = Config(
         # 'dTdt' checks whether the temperature FIELD itself is still
         # changing anywhere in space -- validated in burnerFla_test.py.
         measurement='dTdt',
-        dTdtTol=1.0,        # tightened from default 10.0 [1/s], as burnerFla_test.py
+        dTdtTol=0.03,        # tightened from default 10.0 [1/s], as burnerFla_test.py
         tMin=0.02,         # let the start-up transient clear first, as burnerFla_test.py
         tEnd=0.2,           # generous headroom
     ),
@@ -205,16 +205,16 @@ conf = Config(
             collisionSpeciesA=collisionSpeciesA,
             collisionSpeciesB=collisionSpeciesB,
         ),
-        coagulation=True,
+        coagulation=False,
         # Particles shrinking below this diameter [m] disintegrate (N removed
         # with the lost mass); also the floor for the particle-diffusivity size.
         minParticleDiameter=0.4e-9,
-        condensationSpecies=clusterSpecies + ['FEO'],
+        #condensationSpecies=clusterSpecies + ['FEO'],
     ),
 )
 
 if __name__ == '__main__':
-    conf.run()
+    #conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 
@@ -341,6 +341,7 @@ if __name__ == '__main__':
         ax.legend(loc='best', fontsize=8)
     for ax in axes[-1, :]:
         ax.set_xlabel('Position [m]')
+    ax.set_xlim(0,0.1)
     fig.suptitle('Ember (with particles) vs Cantera BurnerFlame')
     fig.tight_layout()
     fig.savefig(output + '/Particles_overview.png')
