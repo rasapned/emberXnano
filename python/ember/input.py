@@ -374,6 +374,22 @@ class Chemistry(Options):
     threshold = FloatOption(1e-5, level=2, label='Approx. transport threshold',
         filter=lambda conf: conf.chemistry.transportModel == 'Approx')
 
+    #: Mixture viscosity and thermal conductivity. ``cantera``: from the
+    #: Cantera ``transportModel``. ``sutherland``: as OpenFOAM's
+    #: ``sutherland`` transport with ``reactingMixture``: per-species
+    #: Sutherland coefficients averaged by *mass* fraction,
+    #: ``mu = As*sqrt(T)/(1 + Ts/T)`` and the modified Eucken relation
+    #: ``k = mu*cv*(1.32 + 1.77*R/cv)`` (mixture cv [J/kg/K], R = R_u/W).
+    #: Species diffusion always comes from ``transportModel``.
+    conductivityModel = StringOption("cantera", ("sutherland",), level=1)
+
+    #: Sutherland coefficients ``{species: (As [Pa*s/K^0.5], Ts [K])}`` for
+    #: ``conductivityModel = 'sutherland'``, e.g. from
+    #: :func:`ember.utils.readFoamSutherland`. Species not listed are fitted
+    #: to Cantera's pure-species viscosity over 300-3000 K (with a warning).
+    sutherlandCoefficients = Option(None, level=1,
+        filter=lambda conf: conf.chemistry.conductivityModel == 'sutherland')
+
     #: Set a scalar multiplier for the reaction rate term as a function time
     rateMultiplierFunction = Option(None, level=3)
 

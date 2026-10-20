@@ -88,6 +88,24 @@ class NpzStruct(Struct):
             self[k] = v
 
 
+def readFoamSutherland(filename):
+    """
+    Read the per-species Sutherland coefficients from an OpenFOAM
+    ``thermo.compressibleGas`` (foamChemistryThermoFile) file, for
+    ``Chemistry(conductivityModel='sutherland', sutherlandCoefficients=...)``.
+    Returns ``{species: (As, Ts)}``.
+    """
+    import re
+    text = open(filename).read()
+    coeffs = {}
+    for name, body in re.findall(r'\n([A-Za-z][^\s{}]*)\s*\{(.*?)\n\}', text, re.S):
+        As = re.search(r'\bAs\s+([-+\d.eE]+)\s*;', body)
+        Ts = re.search(r'\bTs\s+([-+\d.eE]+)\s*;', body)
+        if As and Ts:
+            coeffs[name] = (float(As.group(1)), float(Ts.group(1)))
+    return coeffs
+
+
 def load(filename):
     """
     Generate an :class:`Struct` object from a saved profile.

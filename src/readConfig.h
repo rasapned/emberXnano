@@ -117,6 +117,10 @@ public:
     std::string kineticsModel; //!< [chemistry.kineticsModel]
     std::string transportModel; //!< [chemistry.transportModel]
     double transportThreshold; //!< [chemistry.threshold]
+    std::string conductivityModel; //!< [chemistry.conductivityModel]
+    //! Sutherland coefficients per mechanism species, As [Pa*s/K^0.5] and
+    //! Ts [K] (conductivityModel = "sutherland")
+    std::vector<double> sutherlandAs, sutherlandTs;
     std::string rateMultiplierFunctionType; //!< [see chemistry.rateMultiplierFunction]
 
     double pressure; //!< [initialConditoin.pressure]

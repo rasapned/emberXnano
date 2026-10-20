@@ -67,6 +67,8 @@ cdef extern from "readConfig.h":
 
         string gasMechanismFile, gasPhaseID, transportModel, kineticsModel
         double transportThreshold
+        string conductivityModel
+        vector[double] sutherlandAs, sutherlandTs
 
         double pressure
 

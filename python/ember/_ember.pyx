@@ -177,6 +177,41 @@ def _speciesCollisionProperties(gas, name):
     return k, d, m
 
 
+def _sutherlandCoefficients(gas, given):
+    """Per-species Sutherland (As [Pa*s/K^0.5], Ts [K]) in mechanism order.
+
+    Species in *given* ({name: (As, Ts)}) use those values; the others are
+    fitted to Cantera's pure-species viscosity over 300-3000 K, linearising
+    mu = As*sqrt(T)/(1 + Ts/T) as sqrt(T)/mu = 1/As + (Ts/As)/T.
+    """
+    given = given or {}
+    unknown = set(given) - set(gas.species_names)
+    if unknown:
+        raise ValueError("Chemistry.sutherlandCoefficients: species %s not in"
+                         " the mechanism." % sorted(unknown))
+    missing = [name for name in gas.species_names if name not in given]
+    fitted = {}
+    if missing:
+        state = gas.TPY
+        transportModel = gas.transport_model
+        gas.transport_model = 'mixture-averaged'
+        Ts = np.linspace(300.0, 3000.0, 28)
+        mu = []
+        for T in Ts:
+            gas.TP = T, state[1]
+            mu.append(gas.species_viscosities)
+        mu = np.array(mu)
+        gas.transport_model = transportModel
+        gas.TPY = state
+        for name in missing:
+            b, a = np.polyfit(1.0 / Ts, np.sqrt(Ts) / mu[:, gas.species_index(name)], 1)
+            fitted[name] = (1.0 / a, b / a)
+        print("Warning: Sutherland coefficients fitted to Cantera viscosity"
+              " for: %s" % ', '.join(missing))
+    coeffs = [given[n] if n in given else fitted[n] for n in gas.species_names]
+    return [float(c[0]) for c in coeffs], [float(c[1]) for c in coeffs]
+
+
 def writelog(text):
     CxxSingletonLogfile.write(stringify(text))
 
@@ -224,6 +259,12 @@ cdef class ConfigOptions:
         opts.transportModel = stringify(self.chemistry.transportModel)
         opts.kineticsModel = stringify(self.chemistry.kineticsModel)
         opts.transportThreshold = self.chemistry.threshold
+        opts.conductivityModel = stringify(self.chemistry.conductivityModel)
+        if self.chemistry.conductivityModel == 'sutherland':
+            As, Ts = _sutherlandCoefficients(self.gas,
+                                             self.chemistry.sutherlandCoefficients)
+            opts.sutherlandAs = As
+            opts.sutherlandTs = Ts
         if self.chemistry.rateMultiplierFunction is not None:
             opts.rateMultiplierFunctionType = stringify('chebyshev')
 

@@ -434,6 +434,9 @@ void CanteraGas::setOptions(const ConfigOptions& options)
     transportModel = options.transportModel;
     kineticsModel = options.kineticsModel;
     transportThreshold = options.transportThreshold;
+    useSutherland = (options.conductivityModel == "sutherland");
+    sutherlandAs = options.sutherlandAs;
+    sutherlandTs = options.sutherlandTs;
     mechanismFile = options.gasMechanismFile;
     phaseID = options.gasPhaseID;
     pressure = options.pressure;
@@ -547,12 +550,31 @@ void CanteraGas::getMolecularWeights(double* W) const
 
 double CanteraGas::getViscosity() const
 {
-    return transport->viscosity();
+    if (!useSutherland) {
+        return transport->viscosity();
+    }
+    // OpenFOAM sutherlandTransport mixed as in reactingMixture: As and Ts
+    // averaged by mass fraction, then mu = As*sqrt(T)/(1 + Ts/T)
+    const double* Y = thermo->massFractions();
+    double As = 0, Ts = 0;
+    for (size_t k=0; k<nSpec; k++) {
+        As += Y[k] * sutherlandAs[k];
+        Ts += Y[k] * sutherlandTs[k];
+    }
+    double T = thermo->temperature();
+    return As * sqrt(T) / (1 + Ts / T);
 }
 
 double CanteraGas::getThermalConductivity() const
 {
-    return transport->thermalConductivity();
+    if (!useSutherland) {
+        return transport->thermalConductivity();
+    }
+    // OpenFOAM sutherlandTransport: modified Eucken relation with the
+    // mixture's mass-specific cv and gas constant
+    double cv = thermo->cv_mass();
+    double R = Cantera::GasConstant / thermo->meanMolecularWeight();
+    return getViscosity() * cv * (1.32 + 1.77 * R / cv);
 }
 
 void CanteraGas::getDiffusionCoefficientsMole(dvec& Dkm) const

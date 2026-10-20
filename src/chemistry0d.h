@@ -262,6 +262,11 @@ private:
     std::string transportModel;
     std::string kineticsModel;
     double transportThreshold;
+
+    //! Mixture viscosity/conductivity from OpenFOAM's sutherland +
+    //! reactingMixture model instead of the Cantera transport model
+    bool useSutherland;
+    std::vector<double> sutherlandAs, sutherlandTs;
     std::shared_ptr<Cantera::Kinetics> kinetics;
     std::shared_ptr<Cantera::Transport> transport;
     bool isInitialized;

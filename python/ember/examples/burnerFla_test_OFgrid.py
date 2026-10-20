@@ -26,6 +26,14 @@ X_AR = 1.0 - (X_H2 + X_O2 + X_FEC5O5)
 react = f"H2:{X_H2:.8e}, AR:{X_AR:.8e}, FEC5O5:{X_FEC5O5:.8e}, O2:{X_O2:.8e}"
 
 mechanism = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'
+
+# Mixture viscosity/conductivity in ember: 'cantera' (mixture-averaged) or
+# 'sutherland' (OpenFOAM's sutherland + reactingMixture model, coefficients
+# from the OpenFOAM case). Cantera below always uses its own transport.
+conductivityModel = 'sutherland'
+foamThermo = '/home/piotr/JUNK/NEW_correctedMech_noNano/constant/thermo.compressibleGas'
+if conductivityModel == 'sutherland':
+    output += '_sutherland'
 pressure = 3000.0
 Tu = 300.0
 u_in = 1.5
@@ -77,10 +85,13 @@ U0 = np.zeros(len(x))
 conf = Config(
     Paths(outputDir=output),
     Chemistry(mechanismFile=mechanism,
-              transportModel='Mix'),
+              transportModel='Mix',
+              conductivityModel=conductivityModel,
+              sutherlandCoefficients=(utils.readFoamSutherland(foamThermo)
+                                      if conductivityModel == 'sutherland' else None)),
     General(twinFlame=False,
             flameGeometry='planar',
-            nThreads=8,
+            nThreads=16,
             chemistryIntegrator='cvode',
             splittingMethod='balanced',
             continuityBC='fixedLeft',

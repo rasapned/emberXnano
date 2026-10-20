@@ -55,6 +55,19 @@ $$
 
 Mixture-averaged transport, ideal gas, $\rho = pW/(R_u T)$.
 
+**Viscosity and conductivity** (`CanteraGas::getViscosity/getThermalConductivity`).
+`Chemistry.conductivityModel = 'cantera'` (default): $\mu$, $\lambda$ from the Cantera transport
+model. `'sutherland'`: OpenFOAM's `sutherland` + `reactingMixture` model, with per-species
+coefficients $A_{s,k}$, $T_{s,k}$ (`Chemistry.sutherlandCoefficients`, e.g.
+`utils.readFoamSutherland`; missing species fitted to Cantera's pure-species viscosity):
+
+$$
+\mu = \frac{A_s\sqrt{T}}{1 + T_s/T},\quad A_s = \sum_k Y_k A_{s,k},\ T_s = \sum_k Y_k T_{s,k},\qquad
+\lambda = \mu\, c_v\left(1.32 + 1.77\,\frac{R}{c_v}\right),\ R = \frac{R_u}{W}
+$$
+
+Species diffusion coefficients always come from `transportModel`.
+
 **Continuity** (`ConvectionSystemUTW::f`). $\partial\rho/\partial t$ is assembled from the other
 operators' rates, $\dot\rho = -\rho\,(\dot T/T + W\sum_k \dot Y_k/W_k)$ (`prepareIntegrators`),
 and $rV$ is obtained by quadrature:
@@ -460,6 +473,7 @@ Checks start at `tMin`.
 | df9cb16 | particles | heterogeneous condensation at hard-sphere gas–particle collision rate |
 | 37240fd | BC/config | impinging jet: `Wall` BC (zero-flux half CV, no slip, fixed $T$), continuity from the wall, PI control of $\ln a$ on $\dot m$, prescribed $T(x)$, `'moments'` termination; inlet $W_0$ inflow term and first-face cross-flux credit |
 | b98ce11 | particles | particle enthalpy moment $H$, $T_p$ from condensed-phase tables, latent heat, reaction heat, conduction and Rayleigh radiation |
+| 2026-10-20 | transport | `conductivityModel='sutherland'`: OpenFOAM's mass-fraction-mixed Sutherland $\mu$ and modified-Eucken $\lambda$ (code-to-code comparison) |
 
 ## 8. Known limitations / open points
 
@@ -470,3 +484,7 @@ Checks start at `tMin`.
 - Convection is first-order upwind, so grid adaptation carries the accuracy; refinement closed
   the remaining 1 % gap to Cantera in the impinging-jet validation.
 - `ControlVolume` left BC still lacks the first-face cross-flux credit given to `InletFlux`.
+- `conductivityModel='sutherland'` reproduces OpenFOAM, not better physics: mass-fraction
+  mixing under-weights H$_2$ ($\lambda$ 13–42 % below Wilke/Mathur in H$_2$-rich preheat zones).
+  Remaining differences to OpenFOAM: correction flux ($\propto Y_k$ in ember, inert species in
+  OpenFOAM) and OpenFOAM's energy equation omitting the inert species' enthalpy terms.
