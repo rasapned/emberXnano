@@ -49,7 +49,7 @@ mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
 #mechanism = 'opt-compact-mech-OF2.yaml'
 pressure = 3000.0
 Tu = 300.0
-u_in = 1.1
+u_in = 1.5
 xLeft = 0.0
 xRight = 0.1
 nPoints = 200
@@ -205,16 +205,16 @@ conf = Config(
             collisionSpeciesA=collisionSpeciesA,
             collisionSpeciesB=collisionSpeciesB,
         ),
-        coagulation=False,
+        coagulation=True,
         # Particles shrinking below this diameter [m] disintegrate (N removed
         # with the lost mass); also the floor for the particle-diffusivity size.
         minParticleDiameter=0.4e-9,
-        #condensationSpecies=clusterSpecies + ['FEO'],
+        condensationSpecies=clusterSpecies + ['FEO'],
     ),
 )
 
 if __name__ == '__main__':
-    #conf.run()
+    ##conf.run()
 
     struct = utils.load(output + '/profNow.h5')
 

@@ -36,7 +36,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla'
+output = 'run/burnerFla_OFmech'
 
 # Same reactant composition as single_Igor_nucl.py
 X_FEC5O5 = 0.0003
@@ -49,10 +49,12 @@ react = f"H2:{X_H2:.8e}, AR:{X_AR:.8e}, FEC5O5:{X_FEC5O5:.8e}, O2:{X_O2:.8e}"
 print("Reactants:", react)
 
 #mechanism = 'Iron_elte_Syngas-newTransp.yaml'
-mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
+#mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
+#mechanism = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'
+mechanism = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'  # = former _OFmech (79 reactions, renamed 2026-10-19)
 pressure = 3000.0
 Tu = 300.0
-u_in = 1.1
+u_in = 1.5
 xLeft = 0.0
 xRight = 0.08
 nPoints = 200
@@ -107,7 +109,7 @@ if initMode == 'shifted':
 elif initMode == 'tanh':
     output += '_tanh'
 # Converged run to compare the other starts against in the plots below
-referenceOutput = 'run/burnerFla'
+referenceOutput = 'run/burnerFla_OFmech'
 
 if initMode in ('cantera', 'shifted'):
     shift = initShift if initMode == 'shifted' else 0.0

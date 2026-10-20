@@ -259,6 +259,10 @@ only. Example/validation: `python/ember/examples/example_impingingJet.py`.
 
 - Commit/push only when explicitly asked; this session's git user is
   `sppicwie`, default branch `main`.
+- Before committing a `feat`/`fix` that touches `src/` or `python/ember/`,
+  run the `physics-changelog` skill on the staged diff so
+  `doc/PhysicsChangelog.md` and `doc/PhysicsAndNumerics.md` go into the same
+  commit.
 - Prefer small, targeted edits matching existing style (this codebase mixes
   Eigen `dvec`/`dmatrix`, raw loops with TBB `parallel_for`, and Cantera's
   kmol-based unit convention throughout — match whichever a given file
