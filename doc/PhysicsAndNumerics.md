@@ -232,6 +232,10 @@ $$
 \beta_{c\ell} = \frac{4k_BTd_p}{3\mu}\left(\frac{2}{d_p} + \frac{5.028\,\lambda_g}{d_p^2}\right)
 $$
 
+The division guard in `monodisperseCoagulationKernel` is $10^{-150}$; it must stay far below
+$m_p \sim 10^{-24}$ kg and $d_p^2 \sim 10^{-19}$ m² (the earlier $10^{-18}$ made coagulation
+~300× too slow, fixed 2026-10-21).
+
 **(d) Surface reactions** (`computeSurfaceReactionRates`, commit 7b00e2a). One reaction is
 $\text{reactant}(g) + \text{particle} \to \text{product}(g) + \text{particle}'$:
 
@@ -474,6 +478,7 @@ Checks start at `tMin`.
 | 37240fd | BC/config | impinging jet: `Wall` BC (zero-flux half CV, no slip, fixed $T$), continuity from the wall, PI control of $\ln a$ on $\dot m$, prescribed $T(x)$, `'moments'` termination; inlet $W_0$ inflow term and first-face cross-flux credit |
 | b98ce11 | particles | particle enthalpy moment $H$, $T_p$ from condensed-phase tables, latent heat, reaction heat, conduction and Rayleigh radiation |
 | 2026-10-20 | transport | `conductivityModel='sutherland'`: OpenFOAM's mass-fraction-mixed Sutherland $\mu$ and modified-Eucken $\lambda$ (code-to-code comparison) |
+| 2026-10-21 | fix | coagulation kernel guard $10^{-18}\to10^{-150}$: the old guard exceeded $m_p$ and $d_p^2$ and made coagulation ~300× too slow |
 
 ## 8. Known limitations / open points
 

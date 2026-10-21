@@ -5,6 +5,45 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-10-21 — fix: coagulation kernel guard constant (staged)
+
+**Area:** particles: coagulation
+
+**What changed (physics):** No model change. The Brownian coagulation kernel now evaluates the
+equations it was meant to: the division guard `ROOTVSMALL` was 1e-18 (OpenFOAM's
+single-precision value) and dominated the particle mass and squared diameter it was added to,
+which made coagulation ~300× too slow, i.e. effectively off.
+
+**Equations** (unchanged intent, §4.4c of PhysicsAndNumerics.md):
+
+$$
+\dot N = -\tfrac12\beta_c\,\rho N_A N^2,\quad
+\beta_c = \left(\beta_{fm}^{-1}+\beta_{c\ell}^{-1}\right)^{-1},\quad
+\beta_{fm} = 4d_p^2\sqrt{\frac{\pi k_BT}{m_p}},\quad
+\beta_{c\ell} = \frac{4k_BTd_p}{3\mu}\left(\frac{2}{d_p} + \frac{5.028\,\lambda_g}{d_p^2}\right)
+$$
+
+Previously implemented: $m_p \to m_p + 10^{-18}$ kg and $d_p^2 \to d_p^2 + 10^{-18}$ m² inside
+the kernel. For iron nuclei $m_p \sim 10^{-24}$ kg and $d_p^2 \sim 3\times10^{-19}$ m², so
+$\beta_{fm}$ was reduced by $\approx\sqrt{10^{-18}/m_p}$. Now the guard is $10^{-150}$
+(OpenFOAM's double-precision `ROOTVSMALL`, as used by the reference `monoCalcBeta`).
+
+**Discretisation / numerics:** none; production operator (per grid point, CVODE).
+
+**Conservation & units:** unchanged; coagulation changes only $N$ [kmol/kg gas], particle
+mass moments conserved.
+
+**Code:** `particleUtils.cpp::monodisperseCoagulationKernel`; option `Particles.coagulation`.
+
+**Verification:** at 50 mm in `burnerFla_particles_cond` ($d_p$ = 0.565 nm,
+$m_p = 7.4\times10^{-25}$ kg, $T$ = 1738 K) the logged kernel was $1.35\times10^{-18}$ m³/s,
+reproduced exactly with the old guard; correct value $4.06\times10^{-16}$ (×301). Before the
+fix, cond with and without coagulation differed by 1.7 % in $N$ at 100 mm. After: vs the
+OpenFOAM reference (same kernel), $N$ within 0.2–3 %, $d_p$ 1.639 vs 1.633 nm at 100 mm.
+
+**Limits / open points:** all earlier runs with `coagulation=True` (cond, oxid cases) are
+affected and must be rerun.
+
 ## 2026-10-20 — feat: OpenFOAM Sutherland viscosity/conductivity option (staged)
 
 **Area:** gas transport

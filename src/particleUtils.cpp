@@ -164,7 +164,10 @@ double monodisperseCoagulationKernel(double dc, double mp, double T,
     }
 
     const double kB_ = Cantera::Boltzmann;
-    const double ROOTVSMALL = 1e-18; // guards against division by zero
+    // Guards against division by zero only (OpenFOAM's ROOTVSMALL for double).
+    // It must stay far below the physical values: 1e-18 exceeded mp
+    // (~1e-24 kg) and dc^2 (~1e-19 m^2) and cut the kernel ~300x.
+    const double ROOTVSMALL = 1e-150;
 
     // Free-molecular limit (kinetic theory of gases applied to particle-
     // particle collisions).
