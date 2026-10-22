@@ -5,6 +5,60 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-10-22 — feat: reversible condensation with Kelvin evaporation; coagulation and nucleation multipliers (staged)
+
+**Area:** particles: condensation / evaporation, coagulation, nucleation
+
+**What changed (physics):** With `Particles(evaporation=True)` heterogeneous condensation is
+reversible: each condensing species whose O/metal ratio matches a particle phase also
+evaporates, at the same collision rate times its saturation concentration over the bulk phase,
+the surface activity of that phase (lever-rule fraction) and the Kelvin factor. Species
+without a matching phase (e.g. FeO$_2$) only condense. Evaporated mass below $d_{min}$ removes
+particles (same disintegration ramp as surface reactions). Two sensitivity multipliers:
+`Particles.coagulationEnhancement` ($\beta_c$) and `NucleationChannel.efficiency` ($J$).
+
+**Equations** ($\beta_{kp}$ hard-sphere gas–particle collision kernel at $T$ [m³/s], $n_p$
+[1/m³], $c_k$ [kmol/m³], $a_i$ lever-rule weight of phase $i$, $v_{m,k} = W_k/(\rho_i N_A)$
+[m³], $\sigma = a_\sigma - b_\sigma T_p$ [J/m²], $p^\circ$ gas reference pressure, $g$ standard
+molar Gibbs energies [J/kmol], $\Delta_M$ metal atoms in $k$, $g_i$ per kmol metal):
+
+$$
+R_k = \beta_{kp}\,n_p\left[c_k f_{cap} - a_i\,c_{sat,k}(T_p)\,
+\exp\!\frac{4\sigma v_{m,k}}{\max(d_p,d_{min})\,k_BT_p}\right],\qquad
+c_{sat,k} = \frac{p^\circ}{R_uT}\exp\frac{\Delta_M g_i(T) - g_k(T)}{R_uT}
+$$
+
+Evaporation part: $\dot M_{M,O} \mathrel{-}= \Delta_{M,O}W_{M,O}R^{ev}_k/\rho$,
+$\dot Y_k \mathrel{+}= W_kR^{ev}_k/\rho$, $\dot H \mathrel{-}= R^{ev}_k h_k(T_p)/\rho$;
+$\dot N = -\text{ramp}\,N\,\dot m_{ev}/(M_M+M_O)$ below $1.1d_{min}$.
+Multipliers: $\beta_c \to f_{coag}\beta_c$, $J \to \eta J$.
+
+**Discretisation / numerics:** production operator; $\ln p_{sat,k}$ tabulated in Python on the
+`particleThermoT` grid (200–5000 K, 2 K) from the gas thermo and the lowest-Gibbs condensed
+species of `Particles.phases` (`_phaseEnthalpyTable` now also returns $g_i$), interpolated
+linearly in $T_p$. The Kelvin diameter is floored at $d_{min}$: the factor grows faster than
+$d_p^2$ shrinks, and without the floor the first step diverged.
+
+**Conservation & units:** mass exactly ($W_k = \Delta_MW_M+\Delta_OW_O$); energy with $h_k(T_p)$
+leaving. Fe element flux (inflow vs radial outflow, gas + particles) closes to 0.995–0.998 in
+the impinging-jet runs (gas-only 0.998).
+
+**Code:** `sourceSystem.cpp::computeCondensationRates`, `addDisintegration` (shared with surface
+reactions), `computeCoagulationRates`, `computeNucleationRates`;
+`particleUtils.cpp::phaseActivity`, `condensationSaturationPressure`; options
+`Particles.evaporation`, `surfaceTension`, `coagulationEnhancement`,
+`NucleationChannel.efficiency`.
+
+**Verification:** $p_{sat}$(Fe) = 3.5 Pa at 1811 K (literature ≈ 3.6 Pa). `evaporation=False`
+reproduces the previous jet result bit for bit. Jet case: below 1400 K unchanged, particles
+evaporate from ~13 mm and are gone by 15–18 mm (T ≈ 1600–1700 K). Python tests pass; C++
+`DiffusionSystemTest.CylindricalCoordinates` fails, unrelated (diffusion code unchanged from
+main).
+
+**Limits / open points:** activity = lever-rule fraction (surface-coverage picture, not
+two-phase equilibrium); bulk $\sigma$ and thermo at 1 nm; clusters (Fe$_n$) evaporate as whole
+molecules; $N$ slightly negative at the wall node in some runs.
+
 ## 2026-10-22 — feat: thermo-consistent surface-reaction heat for the particle energy (staged)
 
 **Area:** particles: energy (surface reactions)

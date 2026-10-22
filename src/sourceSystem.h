@@ -77,8 +77,17 @@ public:
     //! etc.) to the production terms of the mM/mO moments and destruction
     //! terms of the condensing gas species: kinetic (hard-sphere,
     //! free-molecular) collisions of gas molecules with particles, sticking
-    //! probability 1. N is unchanged; mass is conserved exactly.
-    void computeCondensationRates(dvec& momentsQ, dvec& speciesD);
+    //! probability 1. With `options->evaporation`, the reverse (Kelvin
+    //! evaporation) goes to the moment destruction / species production
+    //! terms, plus the disintegration sink of N. Mass is conserved exactly.
+    void computeCondensationRates(dvec& momentsQ, dvec& momentsD,
+                                  dvec& speciesQ, dvec& speciesD);
+
+    //! Particle disintegration sink of N for a particle mass removal rate
+    //! massLoss [kg / kg gas / s] at diameter dp [m] below
+    //! 1.1 * `options->minParticleDiameter`; added to momentsD[kN] and
+    //! returned [kmol / kg gas / s].
+    double addDisintegration(double massLoss, double dp, dvec& momentsD);
 
     //! Add the Brownian coagulation sink to `momentsD[kN]` at the current
     //! state (T, moments, rho). Coagulation reduces particle number (N) but

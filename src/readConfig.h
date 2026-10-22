@@ -302,6 +302,9 @@ public:
     std::vector<int> nucStoichA, nucStoichB;
     std::vector<double> nucMassPerEvent;
     std::vector<double> nucCollisionPrefactor;
+    //! [nucleation.efficiency] Multiplier of the collision nucleation rate
+    //! (sticking probability of the nucleating collisions).
+    double nucEfficiency;
 
     //! Gas-particle surface reactions (parallel arrays, one entry per
     //! reaction): gas species surfReactant[r] impinges on a particle and
@@ -322,6 +325,24 @@ public:
     std::vector<int> condSpecies;
     std::vector<double> condDiameter;
     std::vector<int> condDeltaM, condDeltaO;
+
+    //! [particles.evaporation] Reversible condensation: species c with a
+    //! matching particle phase condPhase[c] (index into phaseRatio, -1 =
+    //! none: condensation only) also evaporates, at the collision rate times
+    //! its saturation concentration over the bulk phase, times the activity
+    //! of the phase (lever-rule weight) and the Kelvin factor
+    //! exp(4 sigma v_m / (d_p k_B T_p)). condLnPsat (row-major, nCond x nT,
+    //! on particleThermoT) holds ln(p_sat [Pa]); condMolarVolume [m^3 per
+    //! molecule] is v_m in the phase; sigma = surfaceTensionA -
+    //! surfaceTensionB * T_p [J/m^2] [particles.surfaceTension].
+    bool evaporation;
+    std::vector<int> condPhase;
+    std::vector<double> condLnPsat, condMolarVolume;
+    double surfaceTensionA, surfaceTensionB;
+
+    //! [particles.coagulationEnhancement] Multiplier of the coagulation
+    //! kernel (e.g. van der Waals enhancement, 2-3 at nm sizes).
+    double coagulationEnhancement;
 
     //! Particle energy (particles.energy, nMoments >= 4). particleThermoT [K] is a temperature
     //! grid; phaseEnthalpy (row-major, nPhases x nT) holds for each phase the

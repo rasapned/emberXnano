@@ -264,6 +264,16 @@ R_k = \frac{\pi}{4}(d_p+d_k)^2\sqrt{\frac{8k_BT}{\pi\mu_{kp}}}\;n_p\,c_k\,(\time
 \dot Y_k = -W_kR_k/\rho,\;\; \dot H = R_k h_k(T)/\rho
 $$
 
+With `evaporation=True` (2026-10-22) the rate is net: the reverse term
+$\beta_{kp}n_p\,a_i\,c_{sat,k}(T_p)\exp[4\sigma v_{m,k}/(\max(d_p,d_{min})k_BT_p)]$ is
+subtracted for species whose O/metal ratio matches phase $i$ ($a_i$ lever-rule weight,
+$c_{sat,k} = (p^\circ/R_uT)\exp[(\Delta_Mg_i-g_k)/R_uT]$ tabulated from gas + condensed thermo,
+$\sigma = a_\sigma - b_\sigma T_p$, `surfaceTension`). Evaporated molecules carry $h_k(T_p)$;
+evaporated mass below $1.1d_{min}$ removes $N$ as in (d).
+
+Sensitivity multipliers: `coagulationEnhancement` scales $\beta_c$ in (c),
+`NucleationChannel.efficiency` scales $J$ in (a).
+
 ### 4.5 Particle energy and temperature (commit b98ce11, `energy=True`)
 
 $H$ is the absolute particle enthalpy, on the same reference as the gas NASA thermo.
@@ -485,10 +495,12 @@ Checks start at `tMin`.
 | 2026-10-20 | transport | `conductivityModel='sutherland'`: OpenFOAM's mass-fraction-mixed Sutherland $\mu$ and modified-Eucken $\lambda$ (code-to-code comparison) |
 | 2026-10-21 | fix | coagulation kernel guard $10^{-18}\to10^{-150}$: the old guard exceeded $m_p$ and $d_p^2$ and made coagulation ~300× too slow |
 | 2026-10-22 | particles | thermo-consistent surface-reaction heat $R[h_{react}(T)-h_{prod}(T_p)]$ replaces the prescribed $\Delta H_r$ (which gave $T_p$ ≈ 5000 K) |
+| 2026-10-22 | particles | reversible condensation: Kelvin evaporation with $c_{sat}$ from gas + condensed thermo and lever-rule activity; coagulation/nucleation multipliers |
 
 ## 8. Known limitations / open points
 
-- No particle → gas energy coupling; no evaporation/sublimation; no coalescence heat.
+- No particle → gas energy coupling; no coalescence heat. Evaporation only for condensation
+  species with a matching phase; bulk $\sigma$ and thermo used at 1 nm.
 - Monodisperse size closure (no size distribution); bulk thermo for sub-nm clusters.
 - Particle energy: with thermo-consistent surface heat the particles run 20–140 K below $T$
   in the impinging-jet case (endothermic reduction/etching), against measured overheating.

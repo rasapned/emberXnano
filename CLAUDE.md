@@ -173,6 +173,14 @@ species), so they are **mass-specific** quantities, not raw densities:
   (metal, clusters, oxides) added to particles at the hard-sphere
   gas-particle collision rate, collision diameters from the mechanism's
   transport data, as for collision nucleation.
+  With `Particles(evaporation=True)` it is reversible: species whose
+  O/metal ratio matches a phase also evaporate at the collision rate ×
+  lever-rule phase fraction × C_sat(T_p) (gas thermo + condensed phase
+  species of `Particles.phases`, tabulated in `_ember.pyx`) × Kelvin factor
+  exp(4σv_m/(d_p k_B T_p)), σ = `Particles.surfaceTension`; evaporated mass
+  below `minParticleDiameter` removes N (`addDisintegration`). Multipliers
+  for sensitivity: `Particles.coagulationEnhancement`,
+  `NucleationChannel.efficiency`.
 - Particle energy (`Particles(nMoments=3, energy=True)`; internally one more
   moment row, index `kH = 3`, so C++ `nMoments` = 4): H = absolute particle
   enthalpy [J / kg gas] on the gas thermo's reference; T_p is obtained by
@@ -187,7 +195,7 @@ species), so they are **mass-specific** quantities, not raw densities:
   Arrhenius factor uses T_p; conduction (free-molecular with `thermalAccommodation`, harmonic
   with continuum) and Rayleigh radiation (`radiationAbsorption` E(m),
   `radiationTsurr`) in `computeParticleHeatTransfer()`. No coupling back to the
-  gas energy equation; no evaporation. The relaxation time is ~µs at nm sizes
+  gas energy equation; evaporation removes h_k(T_p). The relaxation time is ~µs at nm sizes
   and 3000 Pa, so use `chemistryIntegrator='cvode'`. With `energy=False`
   (default) the code paths are unchanged (T_p = T_gas). Check: α → ∞ and E(m) = 0 gives
   T_p ≈ T_gas. In plots, the particle mass is `moments[1:3]`, not

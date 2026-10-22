@@ -475,6 +475,10 @@ class NucleationChannel(Options):
     stoichA = IntegerOption(1, min=1)
     stoichB = IntegerOption(1, min=1)
 
+    #: Multiplier of the collision nucleation rate (sticking probability of
+    #: the nucleating collisions; 1 = every collision forms a particle).
+    efficiency = FloatOption(1.0, min=0)
+
     # ======== Classical nucleation theory (CNT) =========
 
     #: List of precursor (cluster) species of a single element present in
@@ -658,6 +662,10 @@ class Particles(Options):
     #: unless ``nMoments`` >= 2 (both N and mM moments are required).
     coagulation = BoolOption(False, level=1)
 
+    #: Multiplier of the coagulation kernel (e.g. the van der Waals
+    #: enhancement, typically 2-3 for nm-sized particles).
+    coagulationEnhancement = FloatOption(1.0, min=0, level=1)
+
     #: List of :class:`SurfaceReaction` gas-particle surface reactions
     #: (oxidation, reduction, etching, condensation). Reactions that change
     #: the particle's O content require ``nMoments`` >= 3.
@@ -675,6 +683,23 @@ class Particles(Options):
     #: Oxygen-containing species require ``nMoments`` >= 3.
     condensationSpecies = Option([])
 
+    #: Make condensation reversible: each *condensationSpecies* whose O/metal
+    #: ratio matches one of the *phases* also evaporates, at the same
+    #: collision rate times ``a * C_sat(T_p) * exp(4 sigma v_m / (d_p k_B
+    #: T_p))``, with C_sat from the saturation pressure of the molecule over
+    #: the bulk phase (gas thermo of the mechanism + condensed species of
+    #: *phases* from *thermoFile*, lowest Gibbs energy), the activity a = the
+    #: lever-rule fraction of that phase in the particle, v_m the molecule's
+    #: volume in the phase and the Kelvin factor of the curved surface.
+    #: Species without a matching phase only condense. Requires the condensed
+    #: species in *phases*. Evaporated mass below *minParticleDiameter* also
+    #: removes particles (disintegration).
+    evaporation = BoolOption(False, level=1)
+
+    #: Surface tension of the particle material for the Kelvin factor,
+    #: ``(a, b)`` with sigma = a - b*T [J/m^2], T in K (default: iron).
+    surfaceTension = Option((2.4152, 2.85e-4), level=1)
+
     #: Particle diameter [m] below which mass-removing surface reactions
     #: also remove particles (disintegration): N then decreases in
     #: proportion to the removed mass, keeping the particle size fixed.
@@ -691,7 +716,8 @@ class Particles(Options):
     #: the particles can reach. The condensed species (from *thermoFile*) are
     #: needed only with *energy* = True: at each temperature the one with the
     #: lowest Gibbs energy among those valid there is used, so polymorphs and
-    #: the liquid (melting) can be listed together. The default is iron: Fe,
+    #: the liquid (melting) can be listed together. They are also needed
+    #: with *evaporation* = True. The default is iron: Fe,
     #: FeO, Fe3O4 and Fe2O3.
     phases = Option([(0.0, 7874.0, ['Fe(a)', 'Fe(c)', 'Fe(d)', 'Fe(L)']),
                      (1.0, 5745.0, ['FeO(s)', 'FeO(L)']),

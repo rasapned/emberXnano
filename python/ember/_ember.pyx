@@ -407,21 +407,26 @@ cdef class ConfigOptions:
         opts.thermalAccommodation = self.particles.thermalAccommodation
         opts.radiationAbsorption = self.particles.radiationAbsorption
         opts.radiationTsurr = self.particles.radiationTsurr
-        if self.particles.energy:
+        evaporation = (self.particles.evaporation and
+                       len(self.particles.condensationSpecies) > 0)
+        if self.particles.energy or evaporation:
             if any(len(p) < 3 or not p[2] for p in self.particles.phases):
-                raise ValueError("particles.phases: with energy = True every phase"
-                                 " needs its condensed species, as (ratio, density,"
+                raise ValueError("particles.phases: with energy = True or"
+                                 " evaporation = True every phase needs its"
+                                 " condensed species, as (ratio, density,"
                                  " [species]).")
             Tgrid = np.arange(200.0, 5000.0 + 1.0, 2.0)
-            table = _phaseEnthalpyTable(self.particles.thermoFile,
-                                        [list(p[2]) for p in self.particles.phases],
-                                        opts.phaseRatio, metal, Tgrid)
+            table, gibbs = _phaseEnthalpyTable(self.particles.thermoFile,
+                                               [list(p[2]) for p in self.particles.phases],
+                                               opts.phaseRatio, metal, Tgrid)
             opts.particleThermoT = list(Tgrid)
             opts.phaseEnthalpy = list(table.ravel())
+        if self.particles.energy:
             if self.general.chemistryIntegrator != 'cvode':
                 print("Warning: the particle energy moment relaxes on ~us time"
                       " scales; use chemistryIntegrator='cvode'.")
         opts.coagulation = self.particles.coagulation
+        opts.coagulationEnhancement = self.particles.coagulationEnhancement
         opts.minParticleDiameter = self.particles.minParticleDiameter
 
         surfReactant, surfProduct = [], []
@@ -459,6 +464,7 @@ cdef class ConfigOptions:
 
         condSpecies, condDiameter = [], []
         condDeltaM, condDeltaO = [], []
+        condPhase, condLnPsat, condMolarVolume = [], [], []
         for name in self.particles.condensationSpecies:
             composition = self.gas.species(name).composition
             dM = int(composition.get(metal, 0))
@@ -477,12 +483,43 @@ cdef class ConfigOptions:
             condDiameter.append(d)
             condDeltaM.append(dM)
             condDeltaO.append(dO)
+
+            # Evaporation: saturation pressure of the molecule over the bulk
+            # phase with its O/metal ratio, dM (metal)_phase <-> k(g)
+            phase = -1
+            if evaporation:
+                for i, ratio in enumerate(opts.phaseRatio):
+                    if abs(dO / dM - ratio) < 1e-6:
+                        phase = i
+            condPhase.append(phase)
+            if phase < 0:
+                condMolarVolume.append(0.0)
+                if evaporation:
+                    condLnPsat.append(np.zeros(len(Tgrid)))
+                    print("Warning: condensation species '%s' (O/%s = %g) has no"
+                          " matching particle phase; it does not evaporate." %
+                          (name, metal, dO / dM))
+                continue
+            thermo = self.gas.species(name).thermo
+            gGas = np.array([thermo.h(T) - T * thermo.s(T) for T in Tgrid])
+            condLnPsat.append(np.log(self.gas.reference_pressure) +
+                              (dM * gibbs[phase] - gGas) / (cantera.gas_constant * Tgrid))
+            condMolarVolume.append(self.gas.molecular_weights[k] /
+                                   (opts.phaseDensity[phase] * cantera.avogadro))
         opts.condSpecies = condSpecies
         opts.condDiameter = condDiameter
         opts.condDeltaM = condDeltaM
         opts.condDeltaO = condDeltaO
+        opts.evaporation = evaporation
+        opts.condPhase = condPhase
+        opts.condLnPsat = list(np.ravel(condLnPsat)) if evaporation else []
+        opts.condMolarVolume = condMolarVolume
+        sigmaA, sigmaB = self.particles.surfaceTension
+        opts.surfaceTensionA = sigmaA
+        opts.surfaceTensionB = sigmaB
 
         nucleation = self.particles.nucleation
+        opts.nucEfficiency = 1.0
         if nucleation is not None:
             nucleation.validate(self.gas, metal)
 
@@ -522,6 +559,7 @@ cdef class ConfigOptions:
             opts.nucStoichB = nucStoichB
             opts.nucMassPerEvent = nucMassPerEvent
             opts.nucCollisionPrefactor = nucCollisionPrefactor
+            opts.nucEfficiency = nucleation.efficiency.value
 
             nucPrecursorSpecies = []
             nucPrecursorAtomCount = []
@@ -607,15 +645,17 @@ cdef class ConfigOptions:
 
 def _phaseEnthalpyTable(thermoFile, phaseSpecies, phaseRatio, metal, Tgrid):
     """
-    Enthalpy [J per kmol of metal] of each particle phase on the temperature
-    grid *Tgrid*, from the condensed species *phaseSpecies* (one list per
-    phase) in *thermoFile*. At each temperature the species with the lowest
-    Gibbs energy among those whose data range covers it is used (polymorphs,
-    melting); outside all ranges, h is extrapolated linearly with cp from the
+    Enthalpy and Gibbs energy [J per kmol of metal] of each particle phase on
+    the temperature grid *Tgrid*, from the condensed species *phaseSpecies*
+    (one list per phase) in *thermoFile*, returned as two arrays (nPhases x
+    nT). At each temperature the species with the lowest Gibbs energy among
+    those whose data range covers it is used (polymorphs, melting); outside
+    all ranges, h is extrapolated linearly with cp (g with -s) from the
     nearest range end.
     """
     allSpecies = {s.name: s for s in cantera.Species.list_from_file(thermoFile)}
     table = np.zeros((len(phaseSpecies), len(Tgrid)))
+    gibbs = np.zeros((len(phaseSpecies), len(Tgrid)))
     for i, (names, ratio) in enumerate(zip(phaseSpecies, phaseRatio)):
         candidates = []
         for name in names:
@@ -636,15 +676,17 @@ def _phaseEnthalpyTable(thermoFile, phaseSpecies, phaseRatio, metal, Tgrid):
             if valid:
                 th, nM = min(valid, key=lambda c: (c[0].h(T) - T * c[0].s(T)) / c[1])
                 table[i, n] = th.h(T) / nM
+                gibbs[i, n] = (th.h(T) - T * th.s(T)) / nM
             else:
                 th, nM = min(candidates, key=lambda c: min(abs(T - c[0].min_temp),
                                                            abs(T - c[0].max_temp)))
                 Tb = min(max(T, th.min_temp), th.max_temp)
                 table[i, n] = (th.h(Tb) + th.cp(Tb) * (T - Tb)) / nM
+                gibbs[i, n] = (th.h(Tb) - Tb * th.s(Tb) - th.s(Tb) * (T - Tb)) / nM
         if np.any(np.diff(table[i]) <= 0):
             raise ValueError("particles.phases: enthalpy of phase %d (%r) is not"
                              " increasing with temperature." % (i, names))
-    return table
+    return table, gibbs
 
 
 cdef np.ndarray[np.double_t, ndim=1] chebyshev1(double x, int N):

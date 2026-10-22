@@ -91,7 +91,8 @@ void SourceSystem::computeNucleationRates
 
         // Calculate the nucleation rate (prefactor has a unit of m^3/s/sqrt(K)/kmol (already * avogadro))
         // Unit of J: kmol/m^3/s
-        double J = options->nucCollisionPrefactor[c] * sqrt(T) * concA * concB;
+        double J = options->nucEfficiency * options->nucCollisionPrefactor[c] *
+                   sqrt(T) * concA * concB;
         // Halve the nucleation for like molecules
         if (kA == kB) {
             // Each A-A collision is counted once, not twice.
@@ -199,7 +200,8 @@ void SourceSystem::computeCoagulationRates(dvec& momentsD)
     double mu_ = gas->getViscosity(); // [Pa*s]
     double meanFreePath = gasMeanFreePath(mu_, T, Wmx_, gas->pressure);
 
-    double beta = monodisperseCoagulationKernel(dc, mp, T, mu_, meanFreePath);
+    double beta = options->coagulationEnhancement *
+                  monodisperseCoagulationKernel(dc, mp, T, mu_, meanFreePath);
 
     // Monodisperse Brownian coagulation halves the physical number density
     // at rate dn/dt = -0.5*beta*n^2 (n = N*rho*Avogadro [particles/m^3]),
@@ -324,18 +326,7 @@ void SourceSystem::computeSurfaceReactionRates
         }
     }
 
-    // Particle disintegration: once particles have shrunk to the threshold
-    // size, removing mass also removes particles, so that the mean particle
-    // mass (and size) stays fixed instead of shrinking further. The switch is
-    // ramped linearly over [dmin, 1.1*dmin]: with a hard switch at dmin the
-    // integrator chatters wherever growth and etching balance near dmin.
-    double dNdt_dis = 0.0;
-    double dmin = options->minParticleDiameter;
-    if (massLoss > 0 && dp < 1.1 * dmin) {
-        double ramp = std::min((1.1 * dmin - dp) / (0.1 * dmin), 1.0);
-        dNdt_dis = ramp * N * massLoss / (mM + std::max(mO, 0.0));
-        momentsD[kN] += dNdt_dis;
-    }
+    double dNdt_dis = addDisintegration(massLoss, dp, momentsD);
 
     if (debug) {
         logFile.write(format(
@@ -345,7 +336,28 @@ void SourceSystem::computeSurfaceReactionRates
     }
 }
 
-void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& speciesD)
+double SourceSystem::addDisintegration(double massLoss, double dp, dvec& momentsD)
+{
+    // Particle disintegration: once particles have shrunk to the threshold
+    // size, removing mass also removes particles, so that the mean particle
+    // mass (and size) stays fixed instead of shrinking further. The switch is
+    // ramped linearly over [dmin, 1.1*dmin]: with a hard switch at dmin the
+    // integrator chatters wherever growth and etching balance near dmin.
+    double dmin = options->minParticleDiameter;
+    if (!(massLoss > 0) || dp >= 1.1 * dmin) {
+        return 0.0;
+    }
+    double N = moments[kN];
+    double mM = moments[kM];
+    double mO = (nMoments > kO) ? moments[kO] : 0.0;
+    double ramp = std::min((1.1 * dmin - dp) / (0.1 * dmin), 1.0);
+    double dNdt_dis = ramp * N * massLoss / (mM + std::max(mO, 0.0));
+    momentsD[kN] += dNdt_dis;
+    return dNdt_dis;
+}
+
+void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
+                                            dvec& speciesQ, dvec& speciesD)
 {
     size_t nCond = options->condSpecies.size();
     if (nCond == 0 || nMoments < 2) {
@@ -371,6 +383,7 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& speciesD)
     double xMax = options->phaseRatio.back();
     double capFactor = (xMax > 0) ? std::max(1.0 - xO / xMax, 0.0) : 0.0;
 
+    double massLoss = 0.0; // particle mass evaporation rate [kg / kg gas / s]
     for (size_t c = 0; c < nCond; c++) {
         size_t k = options->condSpecies[c];
         int dM = options->condDeltaM[c];
@@ -398,7 +411,45 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& speciesD)
         if (nMoments > kH) {
             momentsQ[kH] += R * hk[k] / rho; // enthalpy of the condensed molecules
         }
+
+        // Evaporation (detailed balance with the condensation above): the
+        // collision rate at the saturation concentration over the bulk phase
+        // at Tp, times the activity of that phase at the surface and the
+        // Kelvin factor of the curved surface.
+        int phase = options->evaporation ? options->condPhase[c] : -1;
+        if (phase < 0) {
+            continue;
+        }
+        double activity = phaseActivity(xO, phase, *options);
+        if (!(activity > 0)) {
+            continue;
+        }
+        double sigma = options->surfaceTensionA - options->surfaceTensionB * Tp;
+        // Kelvin factor at no less than the disintegration diameter: it grows
+        // faster than d_p^2 shrinks, so the rate would diverge as d_p -> 0;
+        // below minParticleDiameter particles disintegrate instead.
+        double dKelvin = std::max(dp, options->minParticleDiameter);
+        double kelvin = 4.0 * sigma * options->condMolarVolume[c] /
+                        (dKelvin * Cantera::Boltzmann * Tp);
+        double cSat = condensationSaturationPressure(c, Tp, *options) /
+                      (Cantera::GasConstant * Tp); // [kmol/m^3]
+        double Rev = beta * nParticles * activity * cSat * exp(kelvin); // [kmol/m^3/s]
+
+        double dmM = dM * options->metalWeight * Rev / rho;
+        double dmO = dO * options->oxygenWeight * Rev / rho;
+        momentsD[kM] += dmM;
+        if (dO != 0) {
+            momentsD[kO] += dmO;
+        }
+        massLoss += dmM + dmO;
+        speciesQ[k] += W[k] * Rev / rho;
+        if (nMoments > kH) {
+            // The evaporated molecules leave with their enthalpy at Tp
+            momentsQ[kH] -= Rev * gas->getSpeciesEnthalpy(k, Tp) / rho;
+        }
     }
+
+    addDisintegration(massLoss, dp, momentsD);
 }
 
 void SourceSystem::updateParticleTemperature()
@@ -556,7 +607,7 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
     updateParticleTemperature();
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeCondensationRates(momentsQ, speciesD);
+    computeCondensationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeCoagulationRates(momentsD);
     computeParticleHeatTransfer(momentsQ);
     dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
@@ -914,7 +965,7 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
     updateParticleTemperature();
     computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeCondensationRates(momentsQ, speciesD);
+    computeCondensationRates(momentsQ, momentsD, speciesQ, speciesD);
     computeCoagulationRates(momentsD);
     computeParticleHeatTransfer(momentsQ);
     dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);

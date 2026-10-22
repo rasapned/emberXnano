@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 class ConfigOptions;
 
 //! Small standalone helpers for the particle moments (N, mM, mO) module.
@@ -48,6 +50,18 @@ double particleEnthalpyPerMetal(double T, double x, const ConfigOptions& opts,
 //! where no particles are present (mM <= 0).
 double particleTemperature(double H, double mM, double mO, double Tgas,
                            const ConfigOptions& opts);
+
+//! Lever-rule weight of phase `phase` (index into opts.phaseRatio) in a
+//! particle of O/metal ratio x: 1 - w and w for the two phases bracketing x,
+//! 0 for the others (1 if there is only one phase). Used as the activity of
+//! the phase at the particle surface for evaporation.
+double phaseActivity(double x, int phase, const ConfigOptions& opts);
+
+//! Saturation pressure [Pa] of condensation species c (opts.condSpecies[c])
+//! over its bulk condensed phase at temperature T [K]: exp of
+//! opts.condLnPsat, interpolated linearly on the opts.particleThermoT grid
+//! (T clamped to its range).
+double condensationSaturationPressure(size_t c, double T, const ConfigOptions& opts);
 
 //! Gas mean free path [m] from kinetic theory (Chapman-Enskog), evaluated
 //! from the local dynamic viscosity [Pa*s], temperature [K], mixture

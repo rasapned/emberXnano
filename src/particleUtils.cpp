@@ -108,6 +108,35 @@ double particleEnthalpyPerMetal(double T, double x, const ConfigOptions& opts,
     return (1 - w) * hi + w * hj;
 }
 
+double phaseActivity(double x, int phase, const ConfigOptions& opts)
+{
+    if (opts.phaseRatio.size() < 2) {
+        return (phase == 0) ? 1.0 : 0.0;
+    }
+    size_t i;
+    double w;
+    phaseSegment(x, opts, i, w);
+    if (phase == static_cast<int>(i)) {
+        return 1.0 - w;
+    } else if (phase == static_cast<int>(i) + 1) {
+        return w;
+    }
+    return 0.0;
+}
+
+double condensationSaturationPressure(size_t c, double T, const ConfigOptions& opts)
+{
+    const std::vector<double>& Ts = opts.particleThermoT;
+    size_t nT = Ts.size();
+    T = std::min(std::max(T, Ts[0]), Ts[nT-1]);
+    size_t n = std::min(static_cast<size_t>(
+        std::upper_bound(Ts.begin(), Ts.end(), T) - Ts.begin()), nT - 1);
+    n = std::max(n, static_cast<size_t>(1)) - 1; // Ts[n] <= T <= Ts[n+1]
+    double s = (T - Ts[n]) / (Ts[n+1] - Ts[n]);
+    const double* lnP = &opts.condLnPsat[c * nT];
+    return exp((1 - s) * lnP[n] + s * lnP[n+1]);
+}
+
 double particleTemperature(double H, double mM, double mO, double Tgas,
                            const ConfigOptions& opts)
 {

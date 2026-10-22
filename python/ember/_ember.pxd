@@ -138,6 +138,12 @@ cdef extern from "readConfig.h":
         vector[int] condSpecies
         vector[double] condDiameter
         vector[int] condDeltaM, condDeltaO
+        cbool evaporation
+        vector[int] condPhase
+        vector[double] condLnPsat, condMolarVolume
+        double surfaceTensionA, surfaceTensionB
+        double coagulationEnhancement
+        double nucEfficiency
 
         vector[double] particleThermoT, phaseEnthalpy
         double thermalAccommodation, radiationAbsorption, radiationTsurr
