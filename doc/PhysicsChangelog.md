@@ -5,6 +5,12 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-10-22 — test: example cases on OpenFOAM kinetics mechanism, local OpenFOAM thermo (staged)
+
+No physics/numerics change: burner particle cases and the impinging-jet cases use
+`opt-compact-mech-OF2_OFkinetics_FeTransp.yaml`, OH etching A −2.568e26, and read Sutherland
+coefficients from the local copy `examples/OF_thermo.compressibleGas`.
+
 ## 2026-10-22 — feat: reversible condensation with Kelvin evaporation; coagulation and nucleation multipliers (staged)
 
 **Area:** particles: condensation / evaporation, coagulation, nucleation

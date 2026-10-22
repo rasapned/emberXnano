@@ -31,7 +31,9 @@ X_AR = 1.0 - (X_H2 + X_O2 + X_FEC5O5)
 react = f"H2:{X_H2:.8e}, AR:{X_AR:.8e}, FEC5O5:{X_FEC5O5:.8e}, O2:{X_O2:.8e}"
 print("Reactants:", react)
 
-mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
+mechanism = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'
+# OpenFOAM thermo file with the Sutherland coefficients (conductivityModel)
+foamThermo = 'OF_thermo.compressibleGas'  # copy of the OpenFOAM case's file (corrected Fe Sutherland coefficients)
 pressure = 3000.0
 Tu = 300.0
 u_in = 1.5
@@ -92,10 +94,13 @@ for i in range(1, maxClusterSize + 1):
 conf = Config(
     Paths(outputDir=output),
     Chemistry(mechanismFile=mechanism,
-              transportModel='Mix'),
+              transportModel='Mix',
+              # OpenFOAM's mu/kappa model (as burnerFla_test_OFgrid.py)
+              conductivityModel='sutherland',
+              sutherlandCoefficients=utils.readFoamSutherland(foamThermo)),
     General(twinFlame=False,
             flameGeometry='planar',
-            nThreads=16,
+            nThreads=6,
             chemistryIntegrator='cvode',
             splittingMethod='balanced',
             continuityBC='fixedLeft',
@@ -126,7 +131,7 @@ conf = Config(
     TerminationCondition(
         measurement='dTdt',
         dTdtTol=0.03,
-        tMin=0.02,
+        tMin=0.08,
         tEnd=0.2,
     ),
     Particles(

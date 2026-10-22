@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import cantera as ct
 
 output = 'run/single_Igor_impingingJet_fixedT_particles'
-mech = 'Iron_elte_Syngas-newTransp.yaml'
+mech = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'  # OpenFOAM kinetics, corrected Fe diameters (was Iron_elte_Syngas-newTransp.yaml)
 
 # Lean case, 500 ppm FEC5O5, volume flow rates in sccm
 X_FEC5O5 = 0.0005
@@ -95,7 +95,7 @@ openfoamReactions = [
     ('H2O', 'H2',   2.714e26,  1.081e4),   # oxidation
     ('H2',  'H2O', -8.040e26,  1.663e4),   # reduction
     ('H',   'OH',  -1.079e27,  4.157e3),   # reduction
-    ('OH',  'FEOH', -2.568e27, 1.829e4),   # etching (removes Fe)
+    ('OH',  'FEOH', -2.568e26, 1.829e4),   # etching (removes Fe); as OpenFOAM (was -2.568e27, typo)
 ]
 surfaceReactions = []
 for reactant, product, A_OF, Ea in openfoamReactions:
@@ -113,7 +113,7 @@ conf = Config(
     Chemistry(mechanismFile=mech,
               transportModel='Mix'),
     General(flameGeometry='disc',
-            nThreads=16,
+            nThreads=6,
             chemistryIntegrator='cvode'),
     InitialCondition(reactants=react,
                      Tu=Tburner,

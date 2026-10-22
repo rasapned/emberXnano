@@ -45,13 +45,15 @@ react = f"H2:{X_H2:.8e}, AR:{X_AR:.8e}, FEC5O5:{X_FEC5O5:.8e}, O2:{X_O2:.8e}"
 print("Reactants:", react)
 
 #mechanism = 'Iron_elte_Syngas-newTransp.yaml'
-mechanism = 'opt-compact-mech-OF2_OFkinetics.yaml'
+mechanism = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'
+# OpenFOAM thermo file with the Sutherland coefficients (conductivityModel)
+foamThermo = 'OF_thermo.compressibleGas'  # copy of the OpenFOAM case's file (corrected Fe Sutherland coefficients)
 #mechanism = 'opt-compact-mech-OF2.yaml'
 pressure = 3000.0
 Tu = 300.0
 u_in = 1.5
 xLeft = 0.0
-xRight = 0.1
+xRight = 0.16
 nPoints = 200
 gridMin = 1e-5
 
@@ -79,20 +81,13 @@ print(f"Cantera BurnerFlame: unburned velocity = {flame.velocity[0]:.4f} m/s "
       f"(u_in = {u_in} m/s), Tb = {flame.T[-1]:.1f} K")
 
 # --- Build ember's initial guess from the Cantera solution -----------------
-# Merge Cantera's grid into the uniform one rather than resampling onto the
-# uniform grid alone: Cantera's cells near the burner are a few um wide, and
-# a uniform 200-point grid would smear out that gradient (and with it the
-# burner heat loss). The uniform points keep dx <= gridMax downstream, where
-# Cantera's grid is coarse; points closer than gridMin to their predecessor
-# are dropped.
-xAll = np.union1d(flame.grid[flame.grid < xRight],
-                  np.linspace(xLeft, xRight, nPoints))
-x = [xAll[0]]
-for xi in xAll[1:]:
-    if xi - x[-1] >= gridMin:
-        x.append(xi)
-x[-1] = xRight
-x = np.array(x)
+# Fixed OpenFOAM mesh (as burnerFla_test_OFgrid.py): face positions of its
+# blockMeshDict, 627 cells over 160 mm, simpleGrading 9 -> 628 nodes, the first
+# on the inlet face. Grid adaptation is disabled below (Times).
+nCells, grading = 627, 9.0
+r = grading**(1 / (nCells - 1))
+x = np.concatenate(([0.0], np.cumsum(r**np.arange(nCells))))
+x *= xRight / x[-1]
 T0 = np.interp(x, flame.grid, flame.T)
 Y0 = np.array([np.interp(x, flame.grid, flame.Y[k])
                for k in range(gas.n_species)]).T
@@ -143,7 +138,7 @@ openfoamReactions = [
     ('H2O', 'H2',   2.714e26,  1.081e4),   # oxidation
     ('H2',  'H2O', -8.040e26,  1.663e4),   # reduction
     ('H',   'OH',  -1.079e27,  4.157e3),   # reduction
-    ('OH',  'FEOH', -2.568e27, 1.829e4),   # etching (removes Fe)
+    ('OH',  'FEOH', -2.568e26, 1.829e4),   # etching (removes Fe); as OpenFOAM (was -2.568e27, typo)
 ]
 surfaceReactions = []
 for reactant, product, A_OF, Ea in openfoamReactions:
@@ -161,7 +156,10 @@ for reactant, product, A_OF, Ea in openfoamReactions:
 conf = Config(
     Paths(outputDir=output),
     Chemistry(mechanismFile=mechanism,
-              transportModel='Mix'),
+              transportModel='Mix',
+              # OpenFOAM's mu/kappa model (as burnerFla_test_OFgrid.py)
+              conductivityModel='sutherland',
+              sutherlandCoefficients=utils.readFoamSutherland(foamThermo)),
     General(twinFlame=False,
             flameGeometry='planar',
             nThreads=16,
@@ -190,6 +188,9 @@ conf = Config(
                       ),
     StrainParameters(initial=0.0,
                       final=0.0),
+    # Fixed OpenFOAM grid: never regrid/adapt
+    Times(regridTimeInterval=1e9,
+          regridStepInterval=10**9),
     # No boundaryTol/boundaryTolRm overrides here: for a=0, FlameSolver
     # switches to OneDimGrid::regridUnstrained (grid.cpp), which sizes the
     # domain from the qdot (heat release) profile via
@@ -225,8 +226,8 @@ conf = Config(
         # 'dTdt' checks whether the temperature FIELD itself is still
         # changing anywhere in space -- validated in burnerFla_test.py.
         measurement='dTdt',
-        dTdtTol=1.0,        # tightened from default 10.0 [1/s], as burnerFla_test.py
-        tMin=0.02,         # let the start-up transient clear first, as burnerFla_test.py
+        dTdtTol=0.03,        # tightened from default 10.0 [1/s], as burnerFla_test.py
+        tMin=0.08,         # let the start-up transient clear first, as burnerFla_test.py
         tEnd=0.2,           # generous headroom
     ),
     Particles(

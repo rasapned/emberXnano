@@ -31,7 +31,7 @@ mechanism = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'
 # 'sutherland' (OpenFOAM's sutherland + reactingMixture model, coefficients
 # from the OpenFOAM case). Cantera below always uses its own transport.
 conductivityModel = 'sutherland'
-foamThermo = '/home/piotr/JUNK/NEW_correctedMech_noNano/constant/thermo.compressibleGas'
+foamThermo = 'OF_thermo.compressibleGas'  # copy of the OpenFOAM case's file (corrected Fe Sutherland coefficients)
 if conductivityModel == 'sutherland':
     output += '_sutherland'
 pressure = 3000.0
