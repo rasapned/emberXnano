@@ -251,15 +251,6 @@ void SourceSystem::computeSurfaceReactionRates
     const double WM = options->metalWeight;
     const double WO = options->oxygenWeight;
 
-    // Particle energy: enthalpy change of the particle composition at Tp per
-    // event, from H = nM * h(x, Tp) with x = nO/nM:
-    //     dH = (h - x*dh/dx) * dnM + dh/dx * dnO
-    // The reaction heat itself is the user-specified surfDeltaH.
-    double hP = 0.0, dhdx = 0.0;
-    if (nMoments > kH) {
-        hP = particleEnthalpyPerMetal(Tp, xO, *options, &dhdx);
-    }
-
     double massLoss = 0.0; // particle mass removal rate [kg / kg gas / s]
     for (size_t r = 0; r < nReactions; r++) {
         int dM = options->surfDeltaM[r];
@@ -321,8 +312,15 @@ void SourceSystem::computeSurfaceReactionRates
         }
 
         if (nMoments > kH) {
-            double dHcomposition = (hP - xO * dhdx) * dM + dhdx * dO; // [J/kmol]
-            momentsQ[kH] += R * (dHcomposition - options->surfDeltaH[r]) / rho;
+            // Particle energy: the particle receives the absolute enthalpy of
+            // the impinging molecule (at the gas temperature) and loses that of
+            // the released one (at the particle temperature). H being the
+            // absolute particle enthalpy, this conserves energy exactly: the
+            // reaction heat follows from the gas thermo and the condensed-phase
+            // tables that set Tp from H (enthalpy of the atoms attached to or
+            // removed from the particle). surfDeltaH is an optional extra heat.
+            double hProduct = (p >= 0) ? gas->getSpeciesEnthalpy(p, Tp) : 0.0;
+            momentsQ[kH] += R * (hk[k] - hProduct - options->surfDeltaH[r]) / rho;
         }
     }
 

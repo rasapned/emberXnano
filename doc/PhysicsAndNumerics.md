@@ -285,11 +285,16 @@ $$
 
 $$
 \dot H = \underbrace{\sum_{\text{nucl.}}\frac{J\sum\nu h_k(T)}{\rho} + \sum_k\frac{R_k h_k(T)}{\rho}}_{\text{gas molecules incl. latent heat}}
-+ \sum_r \frac{R_r\big[(h - x_O h')\Delta_M + h'\Delta_O - \Delta H_r\big]}{\rho}
++ \sum_r \frac{R_r\big[h_{react}(T) - h_{prod}(T_p) - \Delta H_r^{extra}\big]}{\rho}
 - N N_A\,(q + P)
 $$
 
-with $h' = \partial h/\partial x$.
+- **Surface-reaction heat** (2026-10-22): the particle gains the absolute enthalpy of the
+  impinging molecule at $T$ and loses that of the released one at $T_p$ ($h_{prod} = 0$ without
+  gas product). With $T_p$ from the condensed tables this is the reaction enthalpy for the
+  particle's oxidation stage and conserves energy exactly. $\Delta H_r^{extra}$
+  (`SurfaceReaction.deltaH`) is an optional non-conserving extra, default 0. Reductions (H$_2$,
+  H) and OH etching are endothermic.
 
 - **Conduction:** the free-molecular and continuum limits are combined harmonically,
   $q = q_{fm}q_c/(q_{fm}+q_c)$:
@@ -479,11 +484,14 @@ Checks start at `tMin`.
 | b98ce11 | particles | particle enthalpy moment $H$, $T_p$ from condensed-phase tables, latent heat, reaction heat, conduction and Rayleigh radiation |
 | 2026-10-20 | transport | `conductivityModel='sutherland'`: OpenFOAM's mass-fraction-mixed Sutherland $\mu$ and modified-Eucken $\lambda$ (code-to-code comparison) |
 | 2026-10-21 | fix | coagulation kernel guard $10^{-18}\to10^{-150}$: the old guard exceeded $m_p$ and $d_p^2$ and made coagulation ~300× too slow |
+| 2026-10-22 | particles | thermo-consistent surface-reaction heat $R[h_{react}(T)-h_{prod}(T_p)]$ replaces the prescribed $\Delta H_r$ (which gave $T_p$ ≈ 5000 K) |
 
 ## 8. Known limitations / open points
 
 - No particle → gas energy coupling; no evaporation/sublimation; no coalescence heat.
 - Monodisperse size closure (no size distribution); bulk thermo for sub-nm clusters.
+- Particle energy: with thermo-consistent surface heat the particles run 20–140 K below $T$
+  in the impinging-jet case (endothermic reduction/etching), against measured overheating.
 - No thermophoresis, no wall deposition.
 - CNT branch unit issues (§4.4b).
 - Convection is first-order upwind, so grid adaptation carries the accuracy; refinement closed

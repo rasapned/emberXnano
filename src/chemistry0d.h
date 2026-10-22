@@ -235,6 +235,9 @@ public:
     void getThermalDiffusionCoefficients(dvec& Dkt) const;
     void getThermalDiffusionCoefficients(double* Dkt) const;
 
+    //! Enthalpy of species k at temperature T [J/kmol] (absolute, ideal gas)
+    double getSpeciesEnthalpy(size_t k, double T) const;
+
     double getSpecificHeatCapacity() const;
     void getSpecificHeatCapacities(dvec& cpSpec) const;
     void getSpecificHeatCapacities(double* cpSpec) const;

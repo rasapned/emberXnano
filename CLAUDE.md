@@ -181,9 +181,10 @@ species), so they are **mass-specific** quantities, not raw densities:
   `Particles.phases` condensed species in `nasa_condensed.yaml`, lowest Gibbs
   energy per T, lever rule in O/metal). Sources: nucleation and condensation
   add the gas molecules' enthalpy hk(T_gas) (latent heat consistent with the
-  mechanism); surface reactions book the composition change at T_p plus the
-  user heat `-SurfaceReaction.deltaH` [J/mol], and their Arrhenius factor
-  uses T_p; conduction (free-molecular with `thermalAccommodation`, harmonic
+  mechanism); surface reactions add the reactant's enthalpy at T_gas and
+  remove the product's at T_p (thermo-consistent heat; `SurfaceReaction.deltaH`
+  is only an optional extra, non-conserving heat, keep 0), and their
+  Arrhenius factor uses T_p; conduction (free-molecular with `thermalAccommodation`, harmonic
   with continuum) and Rayleigh radiation (`radiationAbsorption` E(m),
   `radiationTsurr`) in `computeParticleHeatTransfer()`. No coupling back to the
   gas energy equation; no evaporation. The relaxation time is ~µs at nm sizes

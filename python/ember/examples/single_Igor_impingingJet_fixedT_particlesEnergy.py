@@ -4,7 +4,7 @@ As single_Igor_impingingJet_fixedT_particles.py, plus the particle enthalpy
 moment (Particles energy=True), so that the particles have their own temperature: they
 take up the enthalpy of the nucleating/condensing gas molecules (latent heat,
 consistent with the mechanism and the condensed-phase NASA thermo), the
-surface-reaction heats (deltaH below), and lose heat by conduction to the gas
+surface-reaction heats (from the thermochemistry), and lose heat by conduction to the gas
 (thermal accommodation) and Rayleigh-limit radiation. The surface-reaction
 Arrhenius rates use the particle temperature. The gas temperature is the
 measured profile; the gas energy is not coupled back.
@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 import cantera as ct
 
 output = 'run/single_Igor_impingingJet_fixedT_particlesEnergy_Hrates'
-mech = 'Iron_elte_Syngas-newTransp.yaml'
+mech = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'  # OpenFOAM kinetics, corrected Fe diameters (was Iron_elte_Syngas-newTransp.yaml)
 
 # Lean case, 500 ppm FEC5O5, volume flow rates in sccm
 X_FEC5O5 = 0.0005
@@ -105,38 +105,34 @@ openfoamReactions = [
     ('H2O', 'H2',   2.714e26,  1.081e4),   # oxidation
     ('H2',  'H2O', -8.040e26,  1.663e4),   # reduction
     ('H',   'OH',  -1.079e27,  4.157e3),   # reduction
-    ('OH',  'FEOH', -2.568e27, 1.829e4),   # etching (removes Fe)
+    ('OH',  'FEOH', -2.568e26, 1.829e4),   # etching (removes Fe); as OpenFOAM (was -2.568e27, typo)
 ]
-# Reaction enthalpies deltaH [J/mol] of reactant(g) + particle -> product(g)
-# + particle': only -deltaH heats the particle (its composition change itself
-# is booked at the particle temperature). Currently 0 for all reactions (no
-# reaction heat; the particles are heated only by the latent heat of
-# nucleation/condensation): set the OpenFOAM values in deltaH below. For
-# reference, the standard reaction enthalpies at 298 K for Fe/FeO particles
-# (mechanism gas thermo + Cantera's condensed-phase data) are printed.
+# Surface-reaction heat: taken from the thermochemistry (the particle gets
+# the enthalpy of the reactant at the gas temperature and loses that of the
+# product at the particle temperature; condensed-phase thermo sets Tp), so no
+# deltaH is prescribed. The OpenFOAM values (heat released into the particle,
+# every reaction exothermic) violate energy conservation: reductions by H2/H
+# and etching by OH are endothermic, and oxidation-reduction cycles then heat
+# the particles without limit (Tp ~ 5000 K). For reference, the standard
+# reaction enthalpies at 300 K for Fe/FeO particles (mechanism gas thermo +
+# Cantera's condensed-phase data) are printed.
 condensed = {s.name: s for s in ct.Species.list_from_file('nasa_condensed.yaml')}
-hFe = condensed['Fe(a)'].thermo.h(298.15)       # [J/kmol]
-hFeO = condensed['FeO(s)'].thermo.h(298.15)
+hFe = condensed['Fe(a)'].thermo.h(300.0)       # [J/kmol]
+hFeO = condensed['FeO(s)'].thermo.h(300.0)  # FeO(s) data start at 300 K
 
 def reactionEnthalpy298(reactant, product, dM, dO):
-    """Standard reaction enthalpy [J/mol]; particle change (dM, dO) taken as Fe -> FeO."""
-    h = -gas.species(reactant).thermo.h(298.15)
+    """Standard reaction enthalpy [J/mol] at 300 K; particle change (dM, dO) taken as Fe -> FeO."""
+    h = -gas.species(reactant).thermo.h(300.0)
     if product is not None:
-        h += gas.species(product).thermo.h(298.15)
+        h += gas.species(product).thermo.h(300.0)
     h += hFe * dM + (hFeO - hFe) * dO
     return h / 1000.0
 
-# (reactant, product) -> deltaH [J/mol]; reactions not listed: 0. OpenFOAM
-# values are the heat released into the particle, so deltaH = -value: every
-# surface reaction heats the particle.
-deltaH = {
-    ('O2',  'O'):    -80000.0,
-    ('O',   None):   -578000.0,
-    ('H2O', 'H2'):    -87000.0,
-    ('H2',  'H2O'):   -52000.0,
-    ('H',   'OH'):    -53000.0,
-    ('OH',  'FEOH'): -157000.0,
-}
+# Optional extra heat beyond the thermochemistry, (reactant, product) ->
+# deltaH [J/mol]; keep empty (energy conserving). Previously the OpenFOAM
+# values were set here: O2->O -80e3, O->- -578e3, H2O->H2 -87e3,
+# H2->H2O -52e3, H->OH -53e3, OH->FEOH -157e3.
+deltaH = {}
 
 surfaceReactions = []
 for reactant, product, A_OF, Ea in openfoamReactions:
@@ -145,7 +141,7 @@ for reactant, product, A_OF, Ea in openfoamReactions:
     dM, dO = reaction.particleChange(gas, 'Fe')
     dH = deltaH.get((reactant, product), 0.0)
     reaction.deltaH.value = dH
-    print('Surface reaction %-4s -> %-5s deltaH = %8.1f kJ/mol (298 K standard: %8.1f)' % (
+    print('Surface reaction %-4s -> %-5s extra deltaH = %8.1f kJ/mol (300 K reaction enthalpy from thermo: %8.1f)' % (
         reactant, product, dH / 1e3, reactionEnthalpy298(reactant, product, dM, dO) / 1e3))
     if (dM + dO > 0) != (A_OF > 0):
         raise ValueError("Surface reaction %s -> %s: sign of A (%g) does not"
@@ -158,7 +154,7 @@ conf = Config(
     Chemistry(mechanismFile=mech,
               transportModel='Mix'),
     General(flameGeometry='disc',
-            nThreads=16,
+            nThreads=6,
             chemistryIntegrator='cvode'),
     InitialCondition(reactants=react,
                      Tu=Tburner,

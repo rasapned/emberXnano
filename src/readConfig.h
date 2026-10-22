@@ -333,8 +333,9 @@ public:
     double radiationAbsorption; //!< E(m) [particles.radiationAbsorption]
     double radiationTsurr; //!< [particles.radiationTsurr] [K]
 
-    //! Surface reaction enthalpy [J/kmol of events]; negative (exothermic)
-    //! heats the particle [surfaceReaction.deltaH]
+    //! Optional extra surface-reaction heat [J/kmol of events] beyond the
+    //! thermochemistry (not energy conserving; normally 0); negative heats
+    //! the particle [surfaceReaction.deltaH]
     std::vector<double> surfDeltaH;
 
     //! Classical nucleation theory (CNT), for a single monomer material

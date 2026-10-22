@@ -562,10 +562,13 @@ class SurfaceReaction(Options):
     #: Activation temperature [K].
     Ta = FloatOption(0.0)
 
-    #: Reaction enthalpy [J/mol of events], used only with the particle
-    #: energy moment (``Particles.energy`` = True): the heat -deltaH goes into the
-    #: particle (negative = exothermic, heats it). The enthalpy change of the
-    #: particle composition itself is taken from the phase thermo data.
+    #: Extra heat [J/mol of events] beyond the thermochemistry, used only with
+    #: the particle energy moment (``Particles.energy`` = True): -deltaH goes
+    #: into the particle. The reaction heat itself is already included: the
+    #: particle receives the enthalpy of the reactant (at the gas temperature)
+    #: and loses that of the product (at the particle temperature), and its
+    #: temperature follows from the condensed-phase thermo of *phases*. Keep 0
+    #: unless calibrating; nonzero values break energy conservation.
     deltaH = FloatOption(0.0)
 
     def particleChange(self, gas, metal):

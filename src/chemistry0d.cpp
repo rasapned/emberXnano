@@ -3,6 +3,8 @@
 #include "readConfig.h"
 
 #include "cantera/thermo/ThermoFactory.h"
+#include "cantera/thermo/Species.h"
+#include "cantera/thermo/SpeciesThermoInterpType.h"
 #include "cantera/kinetics/KineticsFactory.h"
 #include "cantera/transport/MixTransport.h"
 #include "cantera/transport/MultiTransport.h"
@@ -624,6 +626,13 @@ void CanteraGas::getThermalDiffusionCoefficients(dvec& Dkt) const
 void CanteraGas::getThermalDiffusionCoefficients(double* Dkt) const
 {
     transport->getThermalDiffCoeffs(Dkt);
+}
+
+double CanteraGas::getSpeciesEnthalpy(size_t k, double T) const
+{
+    double cp_R, h_RT, s_R;
+    thermo->species(k)->thermo->updatePropertiesTemp(T, &cp_R, &h_RT, &s_R);
+    return h_RT * Cantera::GasConstant * T;
 }
 
 double CanteraGas::getSpecificHeatCapacity() const

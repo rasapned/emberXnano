@@ -5,6 +5,47 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-10-22 — feat: thermo-consistent surface-reaction heat for the particle energy (staged)
+
+**Area:** particles: energy (surface reactions)
+
+**What changed (physics):** The heat a surface reaction deposits in the particle is no longer
+prescribed (`SurfaceReaction.deltaH`, previously the OpenFOAM values) but follows from the
+thermochemistry: the particle receives the absolute enthalpy of the impinging gas molecule and
+loses that of the released one. Since $H$ is the absolute particle enthalpy and $T_p$ comes from
+the condensed-phase tables, the reaction heat (including the enthalpy of the atom attached to or
+removed from the Fe$_x$O$_y$ particle) is implied by gas + condensed thermo, and energy is
+conserved exactly. `deltaH` remains as an optional extra heat (default 0, not conserving).
+
+**Equations** ($R_r$ [kmol/m³/s], $h_k(T)$ absolute molar enthalpy of gas species $k$
+[J/kmol] from the mechanism, $\rho$ gas density):
+
+$$
+\dot H\big|_{surf} = \sum_r \frac{R_r\,\big[h_{react}(T) - h_{prod}(T_p) - \Delta H_r^{extra}\big]}{\rho},
+\qquad h_{prod} = 0 \text{ if no gas product}
+$$
+
+Replaced: $\dot H|_{surf} = \sum_r R_r\big[(h - x_O h')\Delta_M + h'\Delta_O - \Delta H_r\big]/\rho$
+(composition change at $T_p$ plus user heat $-\Delta H_r$).
+
+**Discretisation / numerics:** production operator (CVODE); $h_{prod}(T_p)$ from the species'
+NASA polynomials (`CanteraGas::getSpeciesEnthalpy`).
+
+**Conservation & units:** gas enthalpy flux of the reactant/product + $\dot H$ balance exactly;
+J/kg gas for $H$.
+
+**Code:** `sourceSystem.cpp::computeSurfaceReactionRates`, `chemistry0d.cpp::getSpeciesEnthalpy`;
+`SurfaceReaction.deltaH` (meaning changed).
+
+**Verification:** impinging-jet energy case (`single_Igor_impingingJet_fixedT_particlesEnergy.py`):
+with the OpenFOAM deltaH table $T_p$ reached ~5000 K; now $T_p$ is bounded,
+$T_p - T$ = −16 to −123 K. 300 K reaction enthalpies (thermo, kJ/mol): O$_2$→O −23, O→p −521,
+H$_2$O→H$_2$ −30, H$_2$→H$_2$O +30, H→OH +91, OH→FeOH +68 (OpenFOAM: all exothermic).
+
+**Limits / open points:** bulk condensed thermo for nm particles (no surface energy);
+particles end up colder than the gas because reduction and etching are endothermic, while the
+experiment reports hotter particles; heat budget not yet analysed.
+
 ## 2026-10-21 — fix: coagulation kernel guard constant (staged)
 
 **Area:** particles: coagulation
