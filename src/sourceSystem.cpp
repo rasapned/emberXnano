@@ -83,6 +83,11 @@ void SourceSystem::computeNucleationRates
     // The hard-sphere kinetic collision prefactor (diameter/reduced-mass
     // terms) is precomputed once in Python; only sqrt(T) and the
     // concentrations need to be evaluated here.
+    double pMonomer = 0.0; // partial pressure of the metal monomer [Pa]
+    if (options->nucKelvinLimit) {
+        size_t k1 = options->nucMonomerSpecies;
+        pMonomer = Y[k1] * rho / W[k1] * Cantera::GasConstant * T;
+    }
     for (size_t c = 0; c < options->nucSpeciesA.size(); c++) {
         size_t kA = options->nucSpeciesA[c];
         size_t kB = options->nucSpeciesB[c];
@@ -97,6 +102,12 @@ void SourceSystem::computeNucleationRates
         if (kA == kB) {
             // Each A-A collision is counted once, not twice.
             J *= 0.5;
+        }
+        // Only nuclei above the critical size grow: net monomer uptake of the
+        // nucleus ~ (p_1 - p_eq), so no nucleation for p_1 <= p_eq
+        if (options->nucKelvinLimit) {
+            double pEq = nucleusEquilibriumPressure(options->nucAtomsPerEvent[c], T, *options);
+            J *= (pMonomer > pEq) ? 1.0 - pEq / pMonomer : 0.0;
         }
         J = std::max(J, 0.0);
 

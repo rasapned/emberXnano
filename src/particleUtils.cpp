@@ -139,7 +139,10 @@ double phaseActivity(double x, int phase, const ConfigOptions& opts)
     return 0.0;
 }
 
-double condensationSaturationPressure(size_t c, double T, const ConfigOptions& opts)
+namespace {
+// exp of a ln(p) table on opts.particleThermoT, interpolated linearly at T
+// (T clamped to the table range)
+double interpolateLnTable(const double* lnP, double T, const ConfigOptions& opts)
 {
     const std::vector<double>& Ts = opts.particleThermoT;
     size_t nT = Ts.size();
@@ -148,8 +151,22 @@ double condensationSaturationPressure(size_t c, double T, const ConfigOptions& o
         std::upper_bound(Ts.begin(), Ts.end(), T) - Ts.begin()), nT - 1);
     n = std::max(n, static_cast<size_t>(1)) - 1; // Ts[n] <= T <= Ts[n+1]
     double s = (T - Ts[n]) / (Ts[n+1] - Ts[n]);
-    const double* lnP = &opts.condLnPsat[c * nT];
     return exp((1 - s) * lnP[n] + s * lnP[n+1]);
+}
+} // namespace
+
+double condensationSaturationPressure(size_t c, double T, const ConfigOptions& opts)
+{
+    return interpolateLnTable(&opts.condLnPsat[c * opts.particleThermoT.size()], T, opts);
+}
+
+double nucleusEquilibriumPressure(int nAtoms, double T, const ConfigOptions& opts)
+{
+    double v1 = opts.nucMonomerVolume;
+    double dn = std::cbrt(6.0 * nAtoms * v1 / M_PI); // nucleus diameter [m]
+    double sigma = opts.surfaceTensionA - opts.surfaceTensionB * T;
+    return interpolateLnTable(opts.nucLnPsatMonomer.data(), T, opts) *
+           exp(4.0 * sigma * v1 / (dn * Cantera::Boltzmann * T));
 }
 
 double particleTemperature(double H, double mM, double mO, double Tgas,

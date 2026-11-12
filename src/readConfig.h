@@ -305,6 +305,18 @@ public:
     //! [nucleation.efficiency] Multiplier of the collision nucleation rate
     //! (sticking probability of the nucleating collisions).
     double nucEfficiency;
+    //! [nucleation.kelvinLimit] Multiply channel c by max(0, 1 - p_eq/p_1):
+    //! p_1 partial pressure of the metal monomer nucMonomerSpecies, p_eq =
+    //! p_sat exp(4 sigma v_1 / (d_n k_B T)) over a nucleus of
+    //! nucAtomsPerEvent[c] metal atoms (diameter d_n from n v_1).
+    //! nucLnPsatMonomer holds ln(p_sat [Pa]) of the monomer over the
+    //! pure-metal phase on particleThermoT; nucMonomerVolume [m^3] is v_1 in
+    //! that phase; sigma as for evaporation (surfaceTensionA/B).
+    bool nucKelvinLimit;
+    int nucMonomerSpecies;
+    std::vector<int> nucAtomsPerEvent;
+    std::vector<double> nucLnPsatMonomer;
+    double nucMonomerVolume;
 
     //! Gas-particle surface reactions (parallel arrays, one entry per
     //! reaction): gas species surfReactant[r] impinges on a particle and

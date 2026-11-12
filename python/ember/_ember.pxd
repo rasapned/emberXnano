@@ -144,6 +144,11 @@ cdef extern from "readConfig.h":
         double surfaceTensionA, surfaceTensionB
         double coagulationEnhancement
         double nucEfficiency
+        cbool nucKelvinLimit
+        int nucMonomerSpecies
+        vector[int] nucAtomsPerEvent
+        vector[double] nucLnPsatMonomer
+        double nucMonomerVolume
 
         vector[double] particleThermoT, phaseEnthalpy
         double thermalAccommodation, radiationAbsorption, radiationTsurr

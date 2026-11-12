@@ -409,12 +409,14 @@ cdef class ConfigOptions:
         opts.radiationTsurr = self.particles.radiationTsurr
         evaporation = (self.particles.evaporation and
                        len(self.particles.condensationSpecies) > 0)
-        if self.particles.energy or evaporation:
+        kelvinLimit = (self.particles.nucleation is not None and
+                       self.particles.nucleation.kelvinLimit.value)
+        if self.particles.energy or evaporation or kelvinLimit:
             if any(len(p) < 3 or not p[2] for p in self.particles.phases):
-                raise ValueError("particles.phases: with energy = True or"
-                                 " evaporation = True every phase needs its"
-                                 " condensed species, as (ratio, density,"
-                                 " [species]).")
+                raise ValueError("particles.phases: with energy = True,"
+                                 " evaporation = True or nucleation.kelvinLimit"
+                                 " = True every phase needs its condensed"
+                                 " species, as (ratio, density, [species]).")
             Tgrid = np.arange(200.0, 5000.0 + 1.0, 2.0)
             table, gibbs = _phaseEnthalpyTable(self.particles.thermoFile,
                                                [list(p[2]) for p in self.particles.phases],
@@ -520,6 +522,7 @@ cdef class ConfigOptions:
 
         nucleation = self.particles.nucleation
         opts.nucEfficiency = 1.0
+        opts.nucKelvinLimit = kelvinLimit
         if nucleation is not None:
             nucleation.validate(self.gas, metal)
 
@@ -527,6 +530,7 @@ cdef class ConfigOptions:
             nucStoichA, nucStoichB = [], []
             nucMassPerEvent = []
             nucCollisionPrefactor = []
+            nucAtomsPerEvent = []
             stoichA = nucleation.stoichA.value
             stoichB = nucleation.stoichB.value
             for nameA, nameB in zip(nucleation.collisionSpeciesA.value,
@@ -552,7 +556,31 @@ cdef class ConfigOptions:
                 # Always derived, never user-specified: this is what preserves
                 # the exact invariant sum(Y) + mM + mO == 1.
                 nucMassPerEvent.append(stoichA * WA + stoichB * WB)
+                nucAtomsPerEvent.append(int(round(
+                    stoichA * self.gas.n_atoms(kA, metal) +
+                    stoichB * self.gas.n_atoms(kB, metal))))
 
+            if kelvinLimit:
+                # Equilibrium pressure of the metal monomer over a nucleus:
+                # p_sat over the pure-metal phase (metal(g) <-> metal_phase0),
+                # Kelvin factor applied in sourceSystem.cpp
+                monomers = [k for k, s in enumerate(self.gas.species())
+                            if s.composition == {metal: 1.0}]
+                if not monomers:
+                    raise ValueError("Particles.nucleation.kelvinLimit: the"
+                                     " mechanism has no '%s' monomer species."
+                                     % metal)
+                kMon = monomers[0]
+                thermo = self.gas.species(kMon).thermo
+                gMon = np.array([thermo.h(T) - T * thermo.s(T) for T in Tgrid])
+                opts.nucMonomerSpecies = kMon
+                opts.nucLnPsatMonomer = list(
+                    np.log(self.gas.reference_pressure) +
+                    (gibbs[0] - gMon) / (cantera.gas_constant * Tgrid))
+                opts.nucMonomerVolume = (self.gas.molecular_weights[kMon] /
+                                         (opts.phaseDensity[0] * cantera.avogadro))
+
+            opts.nucAtomsPerEvent = nucAtomsPerEvent
             opts.nucSpeciesA = nucSpeciesA
             opts.nucSpeciesB = nucSpeciesB
             opts.nucStoichA = nucStoichA

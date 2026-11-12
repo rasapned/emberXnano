@@ -73,6 +73,12 @@ double phaseActivity(double x, int phase, const ConfigOptions& opts);
 //! (T clamped to its range).
 double condensationSaturationPressure(size_t c, double T, const ConfigOptions& opts);
 
+//! Equilibrium pressure [Pa] of the metal monomer over a nucleus of nAtoms
+//! metal atoms at temperature T [K]: p_sat over the pure-metal phase
+//! (opts.nucLnPsatMonomer) times the Kelvin factor
+//! exp(4 sigma v_1 / (d_n k_B T)), d_n = (6 nAtoms v_1 / pi)^(1/3).
+double nucleusEquilibriumPressure(int nAtoms, double T, const ConfigOptions& opts);
+
 //! Gas mean free path [m] from kinetic theory (Chapman-Enskog), evaluated
 //! from the local dynamic viscosity [Pa*s], temperature [K], mixture
 //! molecular weight [kg/kmol] and pressure [Pa].

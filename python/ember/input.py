@@ -479,6 +479,16 @@ class NucleationChannel(Options):
     #: the nucleating collisions; 1 = every collision forms a particle).
     efficiency = FloatOption(1.0, min=0)
 
+    #: Limit collision nucleation by the stability of the nucleus it forms:
+    #: the rate of each channel is multiplied by max(0, 1 - p_eq/p_1), with
+    #: p_1 the partial pressure of the metal monomer and p_eq its equilibrium
+    #: pressure over a nucleus of the channel's metal atoms (p_sat over the
+    #: pure-metal phase times the Kelvin factor, as for evaporation, with
+    #: *Particles.surfaceTension*; gas temperature). Subcritical nuclei are
+    #: then not formed. Requires the condensed species in *Particles.phases*
+    #: and a metal monomer species (e.g. Fe) in the mechanism.
+    kelvinLimit = BoolOption(False, level=1)
+
     # ======== Classical nucleation theory (CNT) =========
 
     #: List of precursor (cluster) species of a single element present in

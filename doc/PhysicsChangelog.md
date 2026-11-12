@@ -5,6 +5,59 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-12 — feat: Kelvin-limited collision nucleation (staged)
+
+**Area:** particles: nucleation
+
+**What changed (physics):** optional gate on collision nucleation (`NucleationChannel(kelvinLimit=True)`,
+default off). A channel whose nucleus is below the critical size at the local monomer pressure
+forms no particles; above it the rate is reduced by the fraction of the monomer flux not
+balanced by evaporation from the nucleus. The nucleus is treated as a bulk pure-metal sphere
+(capillarity approximation, same $\sigma(T)$ and thermo as evaporation), at the gas temperature.
+
+**Equations:** for channel $c$ with $n_c$ metal atoms per nucleus,
+
+$$
+J_c \leftarrow J_c\,\max\!\left(0,\;1-\frac{p_{eq}(n_c,T)}{p_1}\right),\qquad
+p_1 = \frac{Y_1\rho}{W_1}R_uT,\qquad
+p_{eq} = p_{sat,1}(T)\,\exp\!\left(\frac{4\sigma(T)v_1}{d_n k_BT}\right),
+$$
+
+$$
+p_{sat,1} = p^\circ\exp\!\left(\frac{g_{0}(T)-g_1^\circ(T)}{R_uT}\right),\quad
+v_1 = \frac{W_1}{\rho_{p,0}N_A},\quad d_n = \left(\frac{6n_cv_1}{\pi}\right)^{1/3},\quad
+\sigma = \sigma_A - \sigma_BT
+$$
+
+$p_1$ [Pa] monomer (species of composition {metal: 1}) partial pressure; $g_0$ [J/kmol] molar
+Gibbs energy of the pure-metal phase (`phases[0]` condensed species, lowest $g$ per $T$),
+$g_1^\circ$ that of the gas monomer, $p^\circ$ the reference pressure; $\rho_{p,0}$ the phase-0
+density; $n_c = \mathrm{round}(\nu_A n_{M,A} + \nu_B n_{M,B})$.
+
+**Discretisation / numerics:** production operator (`computeNucleationRates`), evaluated per
+point; $\ln p_{sat,1}$ tabulated on the 2 K `particleThermoT` grid, linear interpolation (shared
+with the condensation $p_{sat}$ table). The factor is not differentiated separately; it enters
+the CVODE RHS like the rest of $J$.
+
+**Conservation & units:** only $J$ is scaled, so the gas/particle mass and enthalpy transfer of
+each event is unchanged and $\sum Y_k + M_M + M_O$ is still conserved. $R_u$, $N_A$ kmol-based.
+Affects the steady solution.
+
+**Code:** `sourceSystem.cpp::computeNucleationRates`, `particleUtils.cpp::nucleusEquilibriumPressure`,
+`_ember.pyx` (tables, $n_c$, monomer); option `NucleationChannel.kelvinLimit` (needs condensed
+species in `Particles.phases`).
+
+**Verification:** $p_{eq}(8, 1300\,\mathrm K) = 1.49$ Pa, same as an independent Python
+evaluation. Burner nucl-only and cond cases: gate = 1 below ~1100 K, 0.70 at 1190 K, 0 above
+~1250 K; $N$ −0.5 to −1 % downstream, $d_p$ and $T$ unchanged; with evaporation the residual
+negative moments halve (min $N$/peak −1.8 % → −0.86 %). Impinging jet (no particle energy,
+evaporation): no visible change.
+
+**Limits / open points:** bulk $\sigma$ and density for 8-atom nuclei; gate uses $T_{gas}$, not
+$T_p$; only the monomer pressure enters (clusters Fe$_2$–Fe$_7$ are not counted as supersaturation);
+the mechanism's own Fe$_n$ clusters are less stable than this model, so the gate is a consistency
+limit, not a calibrated rate.
+
 ## 2026-11-12 — fix: surface sources of sub-d_min particles evaluated at d_min (staged)
 
 **Area:** particles: surface reactions, condensation / evaporation, disintegration

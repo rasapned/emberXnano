@@ -206,6 +206,13 @@ $$
 Here $c_A, c_B$ are concentrations [kmol/m³], and $d$, $\mu_{AB}$ come from the mechanism's
 transport data.
 
+Optional Kelvin limit (`NucleationChannel(kelvinLimit=True)`): each channel is multiplied by
+$\max(0, 1 - p_{eq}/p_1)$, $p_1$ the metal-monomer partial pressure and
+$p_{eq} = p_{sat,1}(T)\exp(4\sigma v_1/(d_n k_BT))$ the equilibrium pressure over a bulk
+pure-metal nucleus of $n_c$ atoms, $d_n = (6n_cv_1/\pi)^{1/3}$, $v_1 = W_1/(\rho_{p,0}N_A)$;
+$p_{sat,1}$ from the gas and phase-0 condensed Gibbs energies, $\sigma$ as for evaporation
+(`particleUtils.cpp::nucleusEquilibriumPressure`). Subcritical nuclei are not formed.
+
 **(b) Classical nucleation theory** (optional, `precursorSpecies`):
 
 $$
@@ -502,6 +509,7 @@ Checks start at `tMin`.
 | 2026-10-22 | particles | thermo-consistent surface-reaction heat $R[h_{react}(T)-h_{prod}(T_p)]$ replaces the prescribed $\Delta H_r$ (which gave $T_p$ ≈ 5000 K) |
 | 2026-10-22 | particles | reversible condensation: Kelvin evaporation with $c_{sat}$ from gas + condensed thermo and lever-rule activity; coagulation/nucleation multipliers |
 | 2026-11-12 | fix | surface sources of particles below $d_{min}$ evaluated for the same mass in $d_{min}$ particles: sinks first order in mass and $N$, no zero crossing at the evaporation front |
+| 2026-11-12 | particles | optional Kelvin limit on collision nucleation: $J_c \times \max(0, 1-p_{eq}(n_c)/p_1)$, no subcritical nuclei |
 
 ## 8. Known limitations / open points
 
@@ -514,8 +522,9 @@ Checks start at `tMin`.
 - Downstream of an evaporation front the moments stay slightly negative (N to ~−3 % of its
   peak): sub-tolerance values flip sign in the source stage, and balanced splitting carries the
   production rate into the transport stages.
-- Collision nucleation is irreversible: above ~1150–1200 K the Fe$_8$ nuclei it forms are
-  below the critical size (mechanism Fe$_n$ thermo and Kelvin model agree within ~100 K).
+- Collision nucleation is irreversible unless `kelvinLimit=True`: above ~1150–1200 K the Fe$_8$
+  nuclei it forms are below the critical size. The limit uses bulk $\sigma$ and density, $T_{gas}$,
+  and only the monomer pressure; in the burner and jet cases it changes $N$ by < 1 %.
 - CNT branch unit issues (§4.4b).
 - Convection is first-order upwind, so grid adaptation carries the accuracy; refinement closed
   the remaining 1 % gap to Cantera in the impinging-jet validation.
