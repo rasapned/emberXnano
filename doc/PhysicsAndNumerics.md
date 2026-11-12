@@ -171,6 +171,11 @@ $$
 The ratio of the last phase, $x_{max}$, is the oxidation cap,
 $f_{cap} = \max(1 - x_O/x_{max},\,0)$.
 
+For the surface sources (surface reactions, condensation, evaporation) particles below
+$d_{min}$ are taken as the same mass in $d_{min}$ particles (`floorParticleSize`):
+$d_p \to d_{min}$, $n_p \to n_p(d_p/d_{min})^3$, $m_p \to m_p(d_{min}/d_p)^3$, so mass sinks
+stay proportional to the mass and $N$ and mass vanish together (2026-11-12).
+
 ### 4.4 Source terms (`sourceSystem.cpp`, evaluated per grid point)
 
 The particle source terms are added to the chemistry ODE right-hand side:
@@ -265,7 +270,7 @@ R_k = \frac{\pi}{4}(d_p+d_k)^2\sqrt{\frac{8k_BT}{\pi\mu_{kp}}}\;n_p\,c_k\,(\time
 $$
 
 With `evaporation=True` (2026-10-22) the rate is net: the reverse term
-$\beta_{kp}n_p\,a_i\,c_{sat,k}(T_p)\exp[4\sigma v_{m,k}/(\max(d_p,d_{min})k_BT_p)]$ is
+$\beta_{kp}n_p\,a_i\,c_{sat,k}(T_p)\exp[4\sigma v_{m,k}/(d_pk_BT_p)]$ ($d_p \ge d_{min}$, §4.3) is
 subtracted for species whose O/metal ratio matches phase $i$ ($a_i$ lever-rule weight,
 $c_{sat,k} = (p^\circ/R_uT)\exp[(\Delta_Mg_i-g_k)/R_uT]$ tabulated from gas + condensed thermo,
 $\sigma = a_\sigma - b_\sigma T_p$, `surfaceTension`). Evaporated molecules carry $h_k(T_p)$;
@@ -496,6 +501,7 @@ Checks start at `tMin`.
 | 2026-10-21 | fix | coagulation kernel guard $10^{-18}\to10^{-150}$: the old guard exceeded $m_p$ and $d_p^2$ and made coagulation ~300× too slow |
 | 2026-10-22 | particles | thermo-consistent surface-reaction heat $R[h_{react}(T)-h_{prod}(T_p)]$ replaces the prescribed $\Delta H_r$ (which gave $T_p$ ≈ 5000 K) |
 | 2026-10-22 | particles | reversible condensation: Kelvin evaporation with $c_{sat}$ from gas + condensed thermo and lever-rule activity; coagulation/nucleation multipliers |
+| 2026-11-12 | fix | surface sources of particles below $d_{min}$ evaluated for the same mass in $d_{min}$ particles: sinks first order in mass and $N$, no zero crossing at the evaporation front |
 
 ## 8. Known limitations / open points
 
@@ -505,6 +511,11 @@ Checks start at `tMin`.
 - Particle energy: with thermo-consistent surface heat the particles run 20–140 K below $T$
   in the impinging-jet case (endothermic reduction/etching), against measured overheating.
 - No thermophoresis, no wall deposition.
+- Downstream of an evaporation front the moments stay slightly negative (N to ~−3 % of its
+  peak): sub-tolerance values flip sign in the source stage, and balanced splitting carries the
+  production rate into the transport stages.
+- Collision nucleation is irreversible: above ~1150–1200 K the Fe$_8$ nuclei it forms are
+  below the critical size (mechanism Fe$_n$ thermo and Kelvin model agree within ~100 K).
 - CNT branch unit issues (§4.4b).
 - Convection is first-order upwind, so grid adaptation carries the accuracy; refinement closed
   the remaining 1 % gap to Cantera in the impinging-jet validation.

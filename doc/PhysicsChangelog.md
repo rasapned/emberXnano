@@ -5,6 +5,49 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-12 — fix: surface sources of sub-d_min particles evaluated at d_min (staged)
+
+**Area:** particles: surface reactions, condensation / evaporation, disintegration
+
+**What changed (numerics/physics):** below $d_{min}$ (`minParticleDiameter`) particles
+disintegrate instead of shrinking, so their surface sources are now evaluated for the same
+mass in particles of diameter $d_{min}$. Before, $d_p \to 0$ with $N$ finite kept the
+evaporation sink finite (Kelvin factor floored, $n_p$ unchanged) while the particle mass
+vanished: mass and $N$ crossed zero in finite time, the $N, M_M \le 0$ guard then switched all
+sinks off, and the mean particle mass became $\ll$ one atom ($\dot N/N \sim 10^{17}$ 1/s),
+which made CVODE fail at the evaporation front.
+
+**Equations** ($m_p = (M_M+M_O)/(NN_A)$, $n_p = \rho N N_A$): for $d_p < d_{min}$
+
+$$
+d_p \to d_{min},\qquad n_p \to n_p\left(\frac{d_p}{d_{min}}\right)^3,\qquad
+m_p \to m_p\left(\frac{d_{min}}{d_p}\right)^3
+$$
+
+(same $\rho_p(x_O)$, so $n_p m_p$ is kept), used in $\pi d_p^2 n_p$ of the surface reactions
+and in $\beta_{kp}(d_p, m_p)\,n_p$ of condensation and evaporation; the Kelvin diameter is this
+$d_p$ (replaces $\max(d_p, d_{min})$). Mass sinks are then $\propto M_M+M_O$, and the
+disintegration term $\dot N = -N\dot m_{loss}/(M_M+M_O)$ (ramp = 1) becomes
+$\dot N = -kN$ with the same $k$ as $\dot m = -k\,(M_M+M_O)$: $N$ and mass decay together.
+Continuous at $d_p = d_{min}$; no change for $d_p \ge d_{min}$.
+
+**Conservation & units:** unchanged; mass-specific moments, kmol-based $N_A$.
+
+**Code:** `particleUtils.cpp::floorParticleSize`, called in
+`sourceSystem.cpp::computeSurfaceReactionRates` and `computeCondensationRates`. Coagulation
+and the particle diffusivity (already floored in `flameSolver.cpp`) are unchanged.
+
+**Verification:** `burnerFla_particles_cond` (no evaporation) unchanged (max $\Delta N/N_{max}$
+1.4e-5, $\Delta T$ 4e-4 K). `burnerFla_particles_cond_evap` ($d_{min}$ = 0.4 nm): t = 0.08 s
+with 0 CVODE failures (before: abort at 0.031 s after 500); particles evaporate at
+15–22 mm (1400–1570 K). Python tests pass; `DiffusionSystemTest.CylindricalCoordinates`
+fails as before (diffusion code unchanged).
+
+**Limits / open points:** affects the steady solution only where $d_p < d_{min}$. Residual
+negative moments downstream of the evaporation front (N to −3 % of its peak, mass to −0.5 %):
+sub-tolerance $N$ (~1e-14 kmol/kg vs abstol 1e-12) flips sign in the source stage, and the
+balanced-splitting carry-over of the production rate acts in the transport stages.
+
 ## 2026-10-22 — test: example cases on OpenFOAM kinetics mechanism, local OpenFOAM thermo (staged)
 
 No physics/numerics change: burner particle cases and the impinging-jet cases use

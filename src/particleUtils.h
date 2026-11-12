@@ -37,6 +37,16 @@ double particleDiameterFromVolume(double vParticle);
 double computeParticleDiameter(double N, double mM, double mO,
                                const ConfigOptions& opts);
 
+//! Particles below dmin (opts.minParticleDiameter) disintegrate instead of
+//! shrinking, so their surface sources (surface reactions, condensation,
+//! evaporation) are evaluated for the same mass in particles of diameter
+//! dmin: raises dp [m] to dmin and scales the number density nParticles and
+//! the single-particle mass mp (if given) so that the total mass is kept.
+//! Mass sinks then stay proportional to the particle mass, and N and mass
+//! go to zero together instead of crossing it. No change for dp >= dmin.
+void floorParticleSize(double& dp, double& nParticles, double* mp,
+                       const ConfigOptions& opts);
+
 //! Particle enthalpy [J per kmol of metal] at temperature T [K] for the
 //! O/metal atomic ratio x: lever rule between the bracketing phases (as for
 //! the density), linear in T on the opts.particleThermoT grid (T clamped to

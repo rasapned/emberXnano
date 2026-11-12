@@ -55,6 +55,21 @@ double computeParticleDiameter(double N, double mM, double mO,
     return particleDiameterFromVolume(particleVolumeFromMoments(N, mM, mO, opts));
 }
 
+void floorParticleSize(double& dp, double& nParticles, double* mp,
+                       const ConfigOptions& opts)
+{
+    double dmin = opts.minParticleDiameter;
+    if (!(dp < dmin)) {
+        return;
+    }
+    double r3 = std::pow(dp / dmin, 3); // same density, so mass ~ dp^3
+    nParticles *= r3;
+    if (mp) {
+        *mp /= r3;
+    }
+    dp = dmin;
+}
+
 namespace {
 // Phase segment [i, i+1] bracketing the O/metal ratio x, and the lever-rule
 // weight w of phase i+1 (w = 0 with i = last phase if there is only one).

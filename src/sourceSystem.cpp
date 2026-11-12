@@ -239,6 +239,7 @@ void SourceSystem::computeSurfaceReactionRates
     }
     double dp = particleDiameterFromVolume(vParticle); // [m]
     double nParticles = N * rho * Cantera::Avogadro; // [particles / m^3]
+    floorParticleSize(dp, nParticles, nullptr, *options);
     double area = M_PI * dp * dp * nParticles; // particle surface area [m^2 / m^3]
 
     // The surface composition is assumed equal to the particle composition:
@@ -376,6 +377,7 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
     double dp = particleDiameterFromVolume(vParticle); // [m]
     double mp = (mM + std::max(mO, 0.0)) / (N * NA_); // single-particle mass [kg]
     double nParticles = N * rho * NA_; // [particles / m^3]
+    floorParticleSize(dp, nParticles, &mp, *options);
 
     // Same gradual cap as for surface reactions: species richer in O than the
     // most oxidized phase stop condensing as the particle approaches it.
@@ -425,12 +427,11 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
             continue;
         }
         double sigma = options->surfaceTensionA - options->surfaceTensionB * Tp;
-        // Kelvin factor at no less than the disintegration diameter: it grows
-        // faster than d_p^2 shrinks, so the rate would diverge as d_p -> 0;
-        // below minParticleDiameter particles disintegrate instead.
-        double dKelvin = std::max(dp, options->minParticleDiameter);
+        // Kelvin factor of the curved surface; dp is at least
+        // minParticleDiameter (floorParticleSize), otherwise it would grow
+        // faster than d_p^2 shrinks and the rate would diverge as d_p -> 0.
         double kelvin = 4.0 * sigma * options->condMolarVolume[c] /
-                        (dKelvin * Cantera::Boltzmann * Tp);
+                        (dp * Cantera::Boltzmann * Tp);
         double cSat = condensationSaturationPressure(c, Tp, *options) /
                       (Cantera::GasConstant * Tp); // [kmol/m^3]
         double Rev = beta * nParticles * activity * cSat * exp(kelvin); // [kmol/m^3/s]
