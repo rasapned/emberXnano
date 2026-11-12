@@ -265,6 +265,14 @@ void SourceSystem::computeSurfaceReactionRates
     const double WM = options->metalWeight;
     const double WO = options->oxygenWeight;
 
+    // Prescribed heat: the atoms gained or lost carry the particle's own
+    // enthalpy at Tp, from H = nM * h(x, Tp) with x = nO/nM:
+    //     dH = (h - x*dh/dx) * dnM + dh/dx * dnO
+    double hP = 0.0, dhdx = 0.0;
+    if (nMoments > kH && options->surfPrescribedHeat) {
+        hP = particleEnthalpyPerMetal(Tp, xO, *options, &dhdx);
+    }
+
     double massLoss = 0.0; // particle mass removal rate [kg / kg gas / s]
     for (size_t r = 0; r < nReactions; r++) {
         int dM = options->surfDeltaM[r];
@@ -326,15 +334,27 @@ void SourceSystem::computeSurfaceReactionRates
         }
 
         if (nMoments > kH) {
-            // Particle energy: the particle receives the absolute enthalpy of
-            // the impinging molecule (at the gas temperature) and loses that of
-            // the released one (at the particle temperature). H being the
-            // absolute particle enthalpy, this conserves energy exactly: the
-            // reaction heat follows from the gas thermo and the condensed-phase
-            // tables that set Tp from H (enthalpy of the atoms attached to or
-            // removed from the particle). surfDeltaH is an optional extra heat.
-            double hProduct = (p >= 0) ? gas->getSpeciesEnthalpy(p, Tp) : 0.0;
-            momentsQ[kH] += R * (hk[k] - hProduct - options->surfDeltaH[r]) / rho;
+            // The reacting molecule sticks, so it brings its whole sensible
+            // heat h(T) - h(Tp); conduction (computeParticleHeatTransfer)
+            // already transfers the fraction alpha of it for every collision,
+            // so only the remaining (1 - alpha) is added here
+            double hReactantTp = gas->getSpeciesEnthalpy(k, Tp);
+            double sensible = (1.0 - options->thermalAccommodation) *
+                              (hk[k] - hReactantTp); // [J/kmol]
+            if (options->surfPrescribedHeat) {
+                // Prescribed heat -surfDeltaH only (as OpenFOAM): the atoms
+                // gained or lost carry their enthalpy in the particle at Tp
+                double dHcomposition = (hP - xO * dhdx) * dM + dhdx * dO; // [J/kmol]
+                momentsQ[kH] += R * (dHcomposition - options->surfDeltaH[r] + sensible) / rho;
+            } else {
+                // Reaction heat from the thermochemistry at Tp: the particle
+                // receives the absolute enthalpy of the reactant and loses that
+                // of the product. H being the absolute particle enthalpy, the
+                // condensed-phase tables that set Tp from H account for the
+                // atoms attached to or removed from the particle.
+                double hProduct = (p >= 0) ? gas->getSpeciesEnthalpy(p, Tp) : 0.0;
+                momentsQ[kH] += R * (hReactantTp - hProduct + sensible) / rho;
+            }
         }
     }
 
@@ -422,7 +442,12 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
         }
         speciesD[k] += W[k] * R / rho;
         if (nMoments > kH) {
-            momentsQ[kH] += R * hk[k] / rho; // enthalpy of the condensed molecules
+            // Enthalpy of the condensed molecules at Tp, plus the part
+            // (1 - alpha) of their sensible heat not already transferred by
+            // conduction (as for the surface reactions)
+            double hkTp = gas->getSpeciesEnthalpy(k, Tp);
+            momentsQ[kH] += R * (hkTp + (1.0 - options->thermalAccommodation) *
+                                 (hk[k] - hkTp)) / rho;
         }
 
         // Evaporation (detailed balance with the condensation above): the
@@ -486,6 +511,9 @@ void SourceSystem::computeParticleHeatTransfer(dvec& momentsQ)
     const double NA_ = Cantera::Avogadro;
     const double kB_ = Cantera::Boltzmann;
     double dp = particleDiameterFromVolume(vParticle); // [m]
+    // Same mass in d_min particles below d_min, as for the surface sources
+    double nPerKg = N * NA_; // [particles / kg gas]
+    floorParticleSize(dp, nPerKg, nullptr, *options);
 
     // Conduction: free-molecular limit (Filippov & Rosner 2000) with thermal
     // accommodation alpha, combined harmonically with the continuum limit
@@ -505,7 +533,7 @@ void SourceSystem::computeParticleHeatTransfer(dvec& momentsQ)
                pow(kB_, 5) / (pow(Cantera::Planck, 4) * pow(Cantera::lightSpeed, 3)) *
                (pow(Tp, 5) - pow(options->radiationTsurr, 5)); // [W]
 
-    momentsQ[kH] -= N * NA_ * (q + P); // N*NA particles per kg gas
+    momentsQ[kH] -= nPerKg * (q + P);
 }
 
 void SourceSystem::setTimers

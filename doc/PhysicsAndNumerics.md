@@ -306,17 +306,21 @@ $$
 **Enthalpy balance**:
 
 $$
-\dot H = \underbrace{\sum_{\text{nucl.}}\frac{J\sum\nu h_k(T)}{\rho} + \sum_k\frac{R_k h_k(T)}{\rho}}_{\text{gas molecules incl. latent heat}}
-+ \sum_r \frac{R_r\big[h_{react}(T) - h_{prod}(T_p) - \Delta H_r^{extra}\big]}{\rho}
-- N N_A\,(q + P)
+\dot H = \underbrace{\sum_{\text{nucl.}}\frac{J\sum\nu h_k(T)}{\rho} + \sum_k\frac{R_k \big[h_k(T_p) + (1-\alpha_T)S_k\big]}{\rho}}_{\text{gas molecules incl. latent heat}}
++ \sum_r \frac{R_r\,\Delta H_{p,r}}{\rho}
+- N N_A\,(q + P),\qquad S_k = h_k(T) - h_k(T_p)
 $$
 
-- **Surface-reaction heat** (2026-10-22): the particle gains the absolute enthalpy of the
-  impinging molecule at $T$ and loses that of the released one at $T_p$ ($h_{prod} = 0$ without
-  gas product). With $T_p$ from the condensed tables this is the reaction enthalpy for the
-  particle's oxidation stage and conserves energy exactly. $\Delta H_r^{extra}$
-  (`SurfaceReaction.deltaH`) is an optional non-conserving extra, default 0. Reductions (H$_2$,
-  H) and OH etching are endothermic.
+- **Surface-reaction heat**, two exclusive modes (`Particles.surfaceReactionHeat`, 2026-11-12):
+  - `'thermo'` (default): $\Delta H_{p,r} = h_{react}(T_p) - h_{prod}(T_p) + (1-\alpha_T)S_{react}$
+    ($h_{prod} = 0$ without gas product). With $T_p$ from the condensed tables this is the
+    reaction enthalpy for the particle's oxidation stage; `deltaH` must be 0. Reductions (H$_2$,
+    H) and OH etching are endothermic.
+  - `'prescribed'` (as OpenFOAM, not energy conserving): $\Delta H_{p,r} = (h_p - x_Oh_p')\Delta n_M
+    + h_p'\Delta n_O - \Delta H_r + (1-\alpha_T)S_{react}$; the atoms gained/lost carry their
+    enthalpy in the particle at $T_p$, the reaction heat is $-\Delta H_r$ (`SurfaceReaction.deltaH`).
+  - **Sticking molecules** (reaction, condensation) fully accommodate: conduction already
+    transfers $\alpha_T S$ for every collision, so the source terms add $(1-\alpha_T)S$.
 
 - **Conduction:** the free-molecular and continuum limits are combined harmonically,
   $q = q_{fm}q_c/(q_{fm}+q_c)$:
@@ -325,6 +329,8 @@ $$
 q_{fm} = \alpha_T\,\pi d_p^2\,\frac{p}{8}\,\bar c\,\frac{\gamma+1}{\gamma-1}\left(\frac{T_p}{T}-1\right),\qquad
 q_c = 2\pi d_p\lambda (T_p - T)
 $$
+
+  Below $d_{min}$ the heat transfer uses the same mass in $d_{min}$ particles, as the surface sources.
 
 - **Radiation, Rayleigh limit:**
 
@@ -510,14 +516,18 @@ Checks start at `tMin`.
 | 2026-10-22 | particles | reversible condensation: Kelvin evaporation with $c_{sat}$ from gas + condensed thermo and lever-rule activity; coagulation/nucleation multipliers |
 | 2026-11-12 | fix | surface sources of particles below $d_{min}$ evaluated for the same mass in $d_{min}$ particles: sinks first order in mass and $N$, no zero crossing at the evaporation front |
 | 2026-11-12 | particles | optional Kelvin limit on collision nucleation: $J_c \times \max(0, 1-p_{eq}(n_c)/p_1)$, no subcritical nuclei |
+| 2026-11-12 | particles | surface-reaction heat modes `'thermo'` / `'prescribed'` (OpenFOAM $\Delta H_r$); sticking molecules add $(1-\alpha_T)$ of their sensible heat (no double count with conduction); $d_{min}$ floor in heat transfer |
 
 ## 8. Known limitations / open points
 
 - No particle → gas energy coupling; no coalescence heat. Evaporation only for condensation
   species with a matching phase; bulk $\sigma$ and thermo used at 1 nm.
 - Monodisperse size closure (no size distribution); bulk thermo for sub-nm clusters.
-- Particle energy: with thermo-consistent surface heat the particles run 20–140 K below $T$
+- Particle energy: with thermo-consistent surface heat the particles run 40–130 K below $T$
   in the impinging-jet case (endothermic reduction/etching), against measured overheating.
+  With the OpenFOAM heats (`'prescribed'`) $T_p$ runs away to the 5000 K table limit.
+  $\alpha_T = 0.3$ is uncited; the conduction/source split of the sensible heat uses
+  mixture-averaged conduction.
 - No thermophoresis, no wall deposition.
 - Downstream of an evaporation front the moments stay slightly negative (N to ~−3 % of its
   peak): sub-tolerance values flip sign in the source stage, and balanced splitting carries the

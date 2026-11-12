@@ -449,11 +449,15 @@ cdef class ConfigOptions:
             surfA.append(reaction.A.value)
             surfTa.append(reaction.Ta.value)
             surfDeltaH.append(reaction.deltaH.value * 1000.0) # [J/kmol]
-            if self.particles.energy and reaction.deltaH.value != 0.0:
-                print("Warning: surface reaction '%s -> %s' has deltaH = %g J/mol:"
-                      " extra heat beyond the thermochemistry (not energy"
-                      " conserving)." % (reaction.reactant.value,
-                                         reaction.product.value, reaction.deltaH.value))
+            if (self.particles.surfaceReactionHeat == 'thermo' and
+                    reaction.deltaH.value != 0.0):
+                raise ValueError(
+                    "Particles.surfaceReactions: '%s -> %s' has deltaH = %g J/mol,"
+                    " but with surfaceReactionHeat = 'thermo' the reaction heat"
+                    " follows from the thermochemistry; set deltaH = 0 or"
+                    " surfaceReactionHeat = 'prescribed'."
+                    % (reaction.reactant.value, reaction.product.value,
+                       reaction.deltaH.value))
             surfDeltaM.append(dM)
             surfDeltaO.append(dO)
         opts.surfReactant = surfReactant
@@ -461,6 +465,7 @@ cdef class ConfigOptions:
         opts.surfA = surfA
         opts.surfTa = surfTa
         opts.surfDeltaH = surfDeltaH
+        opts.surfPrescribedHeat = (self.particles.surfaceReactionHeat == 'prescribed')
         opts.surfDeltaM = surfDeltaM
         opts.surfDeltaO = surfDeltaO
 

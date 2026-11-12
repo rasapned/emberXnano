@@ -366,10 +366,12 @@ public:
     double radiationAbsorption; //!< E(m) [particles.radiationAbsorption]
     double radiationTsurr; //!< [particles.radiationTsurr] [K]
 
-    //! Optional extra surface-reaction heat [J/kmol of events] beyond the
-    //! thermochemistry (not energy conserving; normally 0); negative heats
-    //! the particle [surfaceReaction.deltaH]
+    //! Prescribed surface-reaction heat [J/kmol of events]; negative heats
+    //! the particle [surfaceReaction.deltaH]. Used only if surfPrescribedHeat
+    //! (particles.surfaceReactionHeat = 'prescribed'), otherwise all 0 and
+    //! the heat follows from the thermochemistry.
     std::vector<double> surfDeltaH;
+    bool surfPrescribedHeat;
 
     //! Classical nucleation theory (CNT), for a single monomer material
     //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in

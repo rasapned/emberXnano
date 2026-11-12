@@ -153,6 +153,7 @@ cdef extern from "readConfig.h":
         vector[double] particleThermoT, phaseEnthalpy
         double thermalAccommodation, radiationAbsorption, radiationTsurr
         vector[double] surfDeltaH
+        cbool surfPrescribedHeat
 
         vector[int] nucPrecursorSpecies
         vector[int] nucPrecursorAtomCount

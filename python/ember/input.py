@@ -576,13 +576,12 @@ class SurfaceReaction(Options):
     #: Activation temperature [K].
     Ta = FloatOption(0.0)
 
-    #: Extra heat [J/mol of events] beyond the thermochemistry, used only with
-    #: the particle energy moment (``Particles.energy`` = True): -deltaH goes
-    #: into the particle. The reaction heat itself is already included: the
-    #: particle receives the enthalpy of the reactant (at the gas temperature)
-    #: and loses that of the product (at the particle temperature), and its
-    #: temperature follows from the condensed-phase thermo of *phases*. Keep 0
-    #: unless calibrating; nonzero values break energy conservation.
+    #: Prescribed reaction heat [J/mol of events], used only with the particle
+    #: energy moment (``Particles.energy`` = True) and
+    #: ``Particles.surfaceReactionHeat`` = 'prescribed': -deltaH goes into the
+    #: particle (negative = exothermic, heats the particle), as in OpenFOAM.
+    #: Must be 0 with the default 'thermo' mode, where the reaction heat
+    #: follows from the thermochemistry.
     deltaH = FloatOption(0.0)
 
     def particleChange(self, gas, metal):
@@ -636,13 +635,25 @@ class Particles(Options):
     #: which the particle temperature follows, so particles can be hotter or
     #: colder than the gas. H receives the enthalpy of the nucleating and
     #: condensing gas molecules and the surface reaction heats
-    #: (``SurfaceReaction.deltaH``; their Arrhenius rates then use the particle
+    #: (*surfaceReactionHeat*; their Arrhenius rates then use the particle
     #: temperature), and loses heat by conduction to the gas
     #: (*thermalAccommodation*) and radiation (*radiationAbsorption*,
     #: *radiationTsurr*). The gas energy equation is not coupled back. The
     #: phases need their condensed species (see *phases*). With *False*
     #: (default) the particles are at the gas temperature.
     energy = BoolOption(False)
+
+    #: Surface-reaction heat with *energy* = True, one of two exclusive modes:
+    #: 'thermo' (default): the reaction heat follows from the gas thermo and
+    #: the condensed-phase thermo of *phases* at the particle temperature
+    #: (energy conserving), and every ``SurfaceReaction.deltaH`` must be 0.
+    #: 'prescribed': the atoms gained or lost carry the particle's own
+    #: enthalpy at the particle temperature, and the reaction heat is
+    #: -``SurfaceReaction.deltaH`` (as OpenFOAM; not energy conserving). In
+    #: both modes the reacting molecule, which sticks, also brings the part
+    #: (1 - *thermalAccommodation*) of its sensible heat h(T) - h(T_p) that
+    #: conduction does not already transfer.
+    surfaceReactionHeat = StringOption('thermo', ('prescribed',), level=1)
 
     #: Fallback diffusivity [m^2/s] for the particle moment scalars, used
     #: only where no particles are present yet (N or mM == 0). Everywhere
@@ -741,7 +752,9 @@ class Particles(Options):
 
     #: Thermal accommodation coefficient for gas-particle conduction
     #: (*energy* = True). Typical values for iron and iron oxide
-    #: nanoparticles: 0.1-0.4.
+    #: nanoparticles: 0.1-0.4. Conduction counts every collision with this
+    #: coefficient; molecules that stick (surface reactions, condensation)
+    #: bring the remaining part of their sensible heat with their enthalpy.
     thermalAccommodation = FloatOption(0.3, min=0, level=1)
 
     #: Absorption function E(m) for the Rayleigh-limit particle radiation

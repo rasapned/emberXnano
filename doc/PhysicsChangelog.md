@@ -5,6 +5,62 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-12 — feat: surface-reaction heat modes; sticking molecules' sensible heat split with conduction (staged)
+
+**Area:** particles: energy (surface reactions, condensation, conduction)
+
+**What changed (physics):** (1) `Particles.surfaceReactionHeat` selects one of two exclusive
+reaction-heat models: `'thermo'` (default, from the thermochemistry; `deltaH` must be 0) or
+`'prescribed'` (only $-\Delta H_r$ = `SurfaceReaction.deltaH`, as OpenFOAM). (2) Conduction counts
+every gas collision with the accommodation $\alpha_T$; a molecule that sticks (reacts or condenses)
+fully accommodates, so the source terms now add only the remaining $(1-\alpha_T)$ of its sensible
+heat. Before, `'thermo'` counted it fully *and* with $\alpha_T$ in conduction. (3) The $d_{min}$
+floor of the surface sources is also applied in the heat transfer.
+
+**Equations** (per event, [J/kmol]; $S_k = h_k(T) - h_k(T_p)$):
+
+$$
+\Delta H_p^{thermo} = h_R(T_p) - h_P(T_p) + (1-\alpha_T)S_R
+\qquad\text{(was } h_R(T) - h_P(T_p)\text{)}
+$$
+
+$$
+\Delta H_p^{prescribed} = (h_p - x_O h_p')\,\Delta n_M + h_p'\,\Delta n_O - \Delta H_r + (1-\alpha_T)S_R,
+\qquad h_p' = \partial h_p/\partial x_O
+$$
+
+$$
+\Delta H_p^{cond} = h_k(T_p) + (1-\alpha_T)S_k \qquad\text{(was } h_k(T)\text{)}
+$$
+
+$h_p(x_O,T_p)$ [J/kmol metal] the lever-rule particle enthalpy; in `'prescribed'` the composition
+term carries the gained/lost atoms at their enthalpy in the particle, so $T_p$ changes only through
+$-\Delta H_r$ and $S_R$. $\dot H \mathrel{+}= R\,\Delta H_p/\rho$. Nucleation ($h_k(T)$) and
+evaporation ($-h_k(T_p)$) unchanged. Heat transfer below $d_{min}$: $n \to n(d_p/d_{min})^3$,
+$d_p \to d_{min}$ (radiation $\propto n d_p^3$ unchanged, conduction $\propto n d_p^2$ reduced).
+
+**Discretisation / numerics:** production operator, per point; no change to the integrator.
+
+**Conservation & units:** `'thermo'` with $\alpha_T = 1$ is the previous energy-conserving form
+minus the double count; for $\alpha_T<1$ the sticking molecule's sensible heat is split between
+conduction ($\alpha_T$, mixture-averaged) and the source term ($1-\alpha_T$, species $h$).
+`'prescribed'` is not energy conserving. Steady solution affected only with `energy=True`.
+
+**Code:** `sourceSystem.cpp::computeSurfaceReactionRates`, `computeCondensationRates`,
+`computeParticleHeatTransfer`; `_ember.pyx` (`surfPrescribedHeat`, error for `deltaH` ≠ 0 in
+`'thermo'`); option `Particles.surfaceReactionHeat`.
+
+**Verification:** 15 Python tests pass. Impinging jet without particle energy bit-identical.
+Energy jet, no evaporation: `'thermo'` $T_p - T$ −129/−97/−107/−88 K at 1/3/5/10 mm (was
+−123/−88/−97/−81); `'prescribed'`, $\Delta H = 0$: +6/+8/+8/+14 K (was +8/+11/+12/+19); gas Fe and
+$d_p$ within 0.01. `'thermo'` before this change reproduced bit-identically by the mode switch.
+
+**Limits / open points:** conduction is mixture-averaged ($\bar c$, $\gamma$ at $T$), the
+source-term part is species-specific, so the split is exact only for a single-species gas; the
+correction uses the free-molecular $\alpha_T$ also when the continuum limit dominates (not the case
+at nm sizes). $\alpha_T = 0.3$ has no cited source. OpenFOAM's H + particle-O rate exceeds the
+H collision rate above ~1400 K at full O coverage.
+
 ## 2026-11-12 — feat: Kelvin-limited collision nucleation (staged)
 
 **Area:** particles: nucleation
