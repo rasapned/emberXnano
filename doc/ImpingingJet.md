@@ -90,7 +90,7 @@ as a 0.6% error in the strain rate. An element balance (inflow `ṁ·Z_in` again
 2. **Cross fluxes at the first face.** The correction and Soret fluxes leaving node 1 toward
    the inlet were never credited to node 0. Fixed in `FlameSolver::updateCrossTerms`.
 
-Both fixes also apply to burner-stabilized flames. Rerunning `burnerFla_test.py` with the
+Both fixes also apply to burner-stabilized flames. Rerunning `burnerFla_test.py` (removed 2026-11-17, see git history) with the
 old and the new code (same Cantera start) shows a small effect:
 
 | | Cantera BurnerFlame | ember, old | ember, new |

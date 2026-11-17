@@ -18,7 +18,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/single_Igor_impingingJet'
+output = 'run/single_Igor/single_Igor_impingingJet'
 mech = 'Iron_elte_Syngas-newTransp.yaml'
 
 # Lean case, 500 ppm FEC5O5, volume flow rates in sccm

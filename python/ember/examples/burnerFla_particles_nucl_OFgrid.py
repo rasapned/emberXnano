@@ -1,12 +1,12 @@
 #!/usr/bin/python
 """
-Nucleation-only burner flame (as run/burnerFla_particles_nucl: the
+Nucleation-only burner flame (as run/burnerFla/burnerFla_particles_nucl: the
 burnerFla_particles_cond.py setup with coagulation=False and no
 condensation) on the fixed OpenFOAM mesh, to check whether the remaining
 ember-OpenFOAM differences in the nucleation case come from the grids.
 
 Grid: the face positions of the OpenFOAM blockMeshDict (e.g.
-OFcomparison/obsolete/compRes2/constant/polyMesh/blockMeshDict) -- 627
+run/burnerFla/OFcomparison/obsolete/compRes2/constant/polyMesh/blockMeshDict) -- 627
 cells over 160 mm, simpleGrading 9 (last/first cell) -- so 628 nodes, the
 first one on the inlet face as OpenFOAM's inlet patch. Grid adaptation and
 boundary regridding are disabled (regrid intervals never reached), so the
@@ -19,7 +19,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_particles_nucl_OFgrid'
+output = 'run/burnerFla/burnerFla_particles_nucl_OFgrid'
 
 # Same reactant composition as single_Igor_nucl.py
 X_FEC5O5 = 0.0003

@@ -3,8 +3,8 @@
 Burner-stabilized flame in ember: single premixed inlet at a prescribed mass
 flux (no opposing stream), unstrained (a=0), free/adiabatic outlet.
 
-Gas-phase setup as in burnerFla_test.py, plus iron particle moments
-(nucleation from Fe clusters, coagulation) -- as burnerFla_particles.py, but
+Gas-phase setup as in burnerFla_test.py (removed 2026-11-17, see git history), plus iron particle moments
+(nucleation from Fe clusters, coagulation) -- as burnerFla_particles.py (also removed), but
 with particle-phase oxygen (nMoments=3) and the gas-particle surface reactions
 of the OpenFOAM model (oxidation by O2/O/H2O, reduction by H2/H, etching by
 OH; see surfaceReactions below), plus heterogeneous condensation of Fe, the Fe
@@ -31,7 +31,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/burnerFla_particles_oxid'
+output = 'run/burnerFla/burnerFla_particles_oxid'
 
 
 # Same reactant composition as single_Igor_nucl.py

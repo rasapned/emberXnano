@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """
-No-particle burner flame (as burnerFla_test.py) with ember AND Cantera both
+No-particle burner flame (as burnerFla_test.py, removed 2026-11-17, see git history) with ember AND Cantera both
 on the fixed OpenFOAM mesh, to compare all three codes at the same resolution.
 
 Grid: the face positions of the OpenFOAM blockMeshDict (627 cells over
@@ -14,7 +14,7 @@ from ember import *
 import numpy as np
 import cantera as ct
 
-output = 'run/burnerFla_OFmech_OFgrid'
+output = 'run/burnerFla/burnerFla_OFmech_OFgrid'
 
 # Same reactant composition as single_Igor_nucl.py
 X_FEC5O5 = 0.0003

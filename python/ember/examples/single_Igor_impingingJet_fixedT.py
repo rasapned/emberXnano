@@ -22,7 +22,7 @@ import cantera as ct
 
 fixedTemperature = True
 
-output = 'run/single_Igor_impingingJet_' + ('fixedT' if fixedTemperature else 'energy')
+output = 'run/single_Igor/single_Igor_impingingJet_' + ('fixedT' if fixedTemperature else 'energy')
 mech = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'  # OpenFOAM kinetics, corrected Fe diameters (was Iron_elte_Syngas-newTransp.yaml)
 
 # Lean case, 500 ppm FEC5O5, volume flow rates in sccm

@@ -25,7 +25,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/single_Igor_impingingJet_fixedT_particles'
+output = 'run/single_Igor/single_Igor_impingingJet_fixedT_particles'
 mech = 'opt-compact-mech-OF2_OFkinetics_FeTransp.yaml'  # OpenFOAM kinetics, corrected Fe diameters (was Iron_elte_Syngas-newTransp.yaml)
 
 # Lean case, 500 ppm FEC5O5, volume flow rates in sccm

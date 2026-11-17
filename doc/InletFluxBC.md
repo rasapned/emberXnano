@@ -110,7 +110,7 @@ That is the source of the small H2 and H difference at the face that remains.
 - **Strang splitting:** `drhodt` only includes `ddtCross` when `splittingMethod == "balanced"`.
   Under Strang this leaks mass (V about +7.6%), so use `splittingMethod='balanced'` for
   burner-stabilized flames.
-- **Validation case:** `python/ember/examples/burnerFla_test.py`. `initMode='cantera'` starts
+- **Validation case:** `python/ember/examples/burnerFla_test.py` (removed 2026-11-17, see git history; the current no-particle burner case is `burnerFla_test_OFgrid.py`). `initMode='cantera'` starts
   from the Cantera profile; `initMode='shifted'` starts from the same profile moved 4 mm
   downstream, to test independence from the initial condition. At t = 0.0248 s the shifted run
   had its flame at `x(1000 K)` = 4.05 mm (Cantera: 4.07 mm), with the outlet temperature still

@@ -9,7 +9,7 @@ split-operator term (convection/diffusion/production/cross) is responsible.
 Usage:
     python plot_burner_diagnostics.py [output_dir] [filename]
 
-Defaults to run/burnerFla_test/profNow.h5 -- pass a different filename
+Defaults to run/burnerFla/burnerFla_test/profNow.h5 -- pass a different filename
 (e.g. err_convectionIntegration.h5, preAdapt.h5, prof000003.h5) to inspect
 a different snapshot. All plots are saved as PNGs into output_dir.
 """
@@ -124,6 +124,6 @@ def plot_diagnostics(output_dir, filename='profNow.h5'):
 
 
 if __name__ == '__main__':
-    output_dir = sys.argv[1] if len(sys.argv) > 1 else 'run/burnerFla_test'
+    output_dir = sys.argv[1] if len(sys.argv) > 1 else 'run/burnerFla/burnerFla_test'
     filename = sys.argv[2] if len(sys.argv) > 2 else 'profNow.h5'
     plot_diagnostics(output_dir, filename)

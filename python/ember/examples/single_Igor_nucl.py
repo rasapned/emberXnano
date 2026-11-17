@@ -13,7 +13,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import cantera as ct
 
-output = 'run/single_Igor_nucl'
+output = 'run/single_Igor/single_Igor_nucl'
 
 # Set strain rate (1/s) for the counterflow flame
 a = 150.0
