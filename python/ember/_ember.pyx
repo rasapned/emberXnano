@@ -434,6 +434,7 @@ cdef class ConfigOptions:
         surfReactant, surfProduct = [], []
         surfA, surfTa, surfDeltaH = [], [], []
         surfDeltaM, surfDeltaO = [], []
+        surfDiameter = []
         for reaction in self.particles.surfaceReactions:
             dM, dO = reaction.particleChange(self.gas, metal)
             if dO != 0 and self.particles.nMoments < 3:
@@ -460,6 +461,11 @@ cdef class ConfigOptions:
                        reaction.deltaH.value))
             surfDeltaM.append(dM)
             surfDeltaO.append(dO)
+            if self.particles.surfaceCollisionLimit:
+                surfDiameter.append(_speciesCollisionProperties(
+                    self.gas, reaction.reactant.value)[1])
+            else:
+                surfDiameter.append(0.0)
         opts.surfReactant = surfReactant
         opts.surfProduct = surfProduct
         opts.surfA = surfA
@@ -468,6 +474,8 @@ cdef class ConfigOptions:
         opts.surfPrescribedHeat = (self.particles.surfaceReactionHeat == 'prescribed')
         opts.surfDeltaM = surfDeltaM
         opts.surfDeltaO = surfDeltaO
+        opts.surfCollisionLimit = self.particles.surfaceCollisionLimit
+        opts.surfDiameter = surfDiameter
 
         condSpecies, condDiameter = [], []
         condDeltaM, condDeltaO = [], []

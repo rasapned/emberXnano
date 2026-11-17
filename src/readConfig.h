@@ -334,6 +334,12 @@ public:
     std::vector<double> surfA, surfTa;
     std::vector<int> surfDeltaM, surfDeltaO;
 
+    //! [particles.surfaceCollisionLimit] Cap surfA * exp(-surfTa/T_p) at the
+    //! hard-sphere collision rate per unit particle area, with the
+    //! reactant's collision diameter surfDiameter[r] [m].
+    bool surfCollisionLimit;
+    std::vector<double> surfDiameter;
+
     //! Heterogeneous condensation (parallel arrays, one entry per condensing
     //! gas species): species condSpecies[k] (collision diameter
     //! condDiameter[k] [m], containing condDeltaM[k] metal and condDeltaO[k]

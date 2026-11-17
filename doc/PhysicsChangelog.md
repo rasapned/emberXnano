@@ -5,6 +5,47 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-17 — feat: optional collision-rate cap on surface reactions (staged)
+
+**Area:** particles: surface reactions
+
+**What changed (physics):** with `Particles.surfaceCollisionLimit = True` the surface rate
+coefficient is capped at the gas–particle collision rate, so a reaction cannot happen more than
+once per collision of the reactant with an available site. The collision rate is the hard-sphere
+kernel already used for condensation, at the gas temperature. Off by default (old rate unchanged).
+
+**Equations:** per unit particle area, $k_r$ [m/s]:
+
+$$
+R_r = \min\!\Big(A_r e^{-T_{a,r}/T_p},\;k_{coll}\Big)\,\theta_r\,(\pi d_p^2 n_p)\,c_{k_r},\qquad
+k_{coll} = \frac14\Big(1+\frac{d_k}{d_p}\Big)^2\sqrt{\frac{8k_BT}{\pi\mu_{kp}}}
+$$
+
+$d_k$ = reactant collision diameter [m] (mechanism transport data), $\mu_{kp} = m_k m_p/(m_k+m_p)$
+[kg], $m_k = W_k/N_A$, $m_p = (M_M + \max(M_O,0))/(N N_A)$ [kg], $T$ gas, $T_p$ particle
+temperature [K]. $k_{coll}\,\pi d_p^2 n_p c_k$ equals the condensation rate $R_k$ of §4.4e.
+Old form: $R_r = A_r e^{-T_{a,r}/T_p}\theta_r(\pi d_p^2 n_p)c_{k_r}$.
+
+**Discretisation / numerics:** production operator, per grid point; below $d_{min}$ the cap is
+evaluated with the floored $d_p = d_{min}$ and $m_p$ scaled by $(d_p/d_{min})^3$, consistent with
+`floorParticleSize`. Steady solution affected where the cap is active.
+
+**Conservation & units:** unchanged ($R_r$ still enters gas and moments with the same
+$W$-weighted terms); units checked: $k_{coll}$ [m/s], kmol-based $N_A$ in $m_k$, $m_p$.
+
+**Code:** `sourceSystem.cpp::computeSurfaceReactionRates`; `Particles.surfaceCollisionLimit`
+(`input.py`), `ConfigOptions::surfCollisionLimit`, `surfDiameter` (from
+`_speciesCollisionProperties` in `_ember.pyx`).
+
+**Verification:** jet grid, impinging-jet energy case: cap off reproduces the uncapped reference
+exactly; with the cap the raw demand $A e^{-T_a/T_p}/k_{coll}$ exceeds 1 for O→p over ~58 % of
+the particle zone without changing the metrics (ΔT ≤ 3 K, extinction ≤ 0.1 mm), and for the
+×2.5/×3 O2/H2O boosts over 80–96 %, which removes their effect (extinction 8.6 → 6.7 mm).
+
+**Limits / open points:** the cap uses the site fraction $\theta_r$ as the available-site
+probability and $T_{gas}$ for the collision rate (molecules arrive from the gas); the Arrhenius
+factor stays at $T_p$. No smooth transition (hard min), so $\partial R/\partial A$ jumps to 0.
+
 ## 2026-11-17 — feat: floor for the moments termination check (staged)
 
 **Area:** numerics: termination

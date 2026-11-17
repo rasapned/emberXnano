@@ -135,6 +135,8 @@ cdef extern from "readConfig.h":
         vector[int] surfReactant, surfProduct
         vector[double] surfA, surfTa
         vector[int] surfDeltaM, surfDeltaO
+        cbool surfCollisionLimit
+        vector[double] surfDiameter
 
         vector[int] condSpecies
         vector[double] condDiameter

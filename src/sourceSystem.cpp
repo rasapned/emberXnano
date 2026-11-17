@@ -249,8 +249,9 @@ void SourceSystem::computeSurfaceReactionRates
         return; // no particles present -- no surface to react on
     }
     double dp = particleDiameterFromVolume(vParticle); // [m]
+    double mp = (mM + std::max(mO, 0.0)) / (N * Cantera::Avogadro); // single-particle mass [kg]
     double nParticles = N * rho * Cantera::Avogadro; // [particles / m^3]
-    floorParticleSize(dp, nParticles, nullptr, *options);
+    floorParticleSize(dp, nParticles, &mp, *options);
     double area = M_PI * dp * dp * nParticles; // particle surface area [m^2 / m^3]
 
     // The surface composition is assumed equal to the particle composition:
@@ -302,8 +303,19 @@ void SourceSystem::computeSurfaceReactionRates
         size_t k = options->surfReactant[r];
         double conc = Y[k] * rho / W[k]; // [kmol/m^3]
         // Arrhenius factor at the particle (surface) temperature
-        double R = options->surfA[r] * exp(-options->surfTa[r] / Tp) *
-                   theta * area * conc; // [kmol/m^3/s]
+        double kSurf = options->surfA[r] * exp(-options->surfTa[r] / Tp); // [m/s]
+        if (options->surfCollisionLimit) {
+            // At most one reaction per collision on an available site:
+            // hard-sphere collision rate per unit particle area (as for
+            // condensation), at the gas temperature
+            double mk = W[k] / Cantera::Avogadro; // molecular mass [kg]
+            double mu = mk * mp / (mk + mp); // reduced mass [kg]
+            double ratio = 1.0 + options->surfDiameter[r] / dp;
+            double kColl = 0.25 * ratio * ratio *
+                           sqrt(8.0 * Cantera::Boltzmann * T / (M_PI * mu)); // [m/s]
+            kSurf = std::min(kSurf, kColl);
+        }
+        double R = kSurf * theta * area * conc; // [kmol/m^3/s]
         R = std::max(R, 0.0);
 
         // Particle composition change. Losses go to the destruction terms,

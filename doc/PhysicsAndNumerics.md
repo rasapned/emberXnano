@@ -262,6 +262,10 @@ $$
   composition: $\dot M_M = \Delta_M W_M R/\rho$, $\dot M_O = \Delta_O W_O R/\rho$.
 - **Gas species:** $\dot Y_{react} = -W_{react}R/\rho$, $\dot Y_{prod} = +W_{prod}R/\rho$
   (mass conserved by construction).
+- **Collision cap** (optional, `Particles.surfaceCollisionLimit`): $A_r e^{-T_{a,r}/T_p}$ is
+  replaced by $\min(A_r e^{-T_{a,r}/T_p}, k_{coll})$, $k_{coll} = \tfrac14(1+d_k/d_p)^2\sqrt{8k_BT/(\pi\mu_{kp})}$
+  [m/s], the hard-sphere collision rate per unit particle area of (e) at the gas $T$: at most one
+  reaction per collision on an available site.
 - **Disintegration** below $d_{min}$ (ramped linearly over $[d_{min}, 1.1d_{min}]$): mass loss
   also removes particles, $\dot N = -\text{ramp}\cdot N\,\dot m_{loss}/(M_M+M_O)$, so the mean
   particle mass stays fixed.
@@ -520,6 +524,7 @@ Checks start at `tMin`.
 | 2026-11-12 | particles | optional Kelvin limit on collision nucleation: $J_c \times \max(0, 1-p_{eq}(n_c)/p_1)$, no subcritical nuclei |
 | 2026-11-12 | particles | surface-reaction heat modes `'thermo'` / `'prescribed'` (OpenFOAM $\Delta H_r$); sticking molecules add $(1-\alpha_T)$ of their sensible heat (no double count with conduction); $d_{min}$ floor in heat transfer |
 | 2026-11-17 | numerics | `'moments'` termination: points below `momentsFloor` × peak left out of the RMS rate |
+| 2026-11-17 | particles | optional cap of the surface rate coefficient at the hard-sphere gas–particle collision rate (`surfaceCollisionLimit`) |
 
 ## 8. Known limitations / open points
 

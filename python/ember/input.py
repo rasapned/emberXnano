@@ -655,6 +655,14 @@ class Particles(Options):
     #: conduction does not already transfer.
     surfaceReactionHeat = StringOption('thermo', ('prescribed',), level=1)
 
+    #: Cap each surface reaction at the gas-particle collision rate: the
+    #: reaction probability per collision on an available site,
+    #: ``A * exp(-Ta/T_p) / k_coll``, is limited to 1, with k_coll the
+    #: hard-sphere collision rate per unit particle area (as for
+    #: condensation), ``(1 + d_k/d_p)^2 / 4 * sqrt(8 k_B T / (pi mu))`` at
+    #: the gas temperature, d_k the reactant's collision diameter.
+    surfaceCollisionLimit = BoolOption(False, level=1)
+
     #: Fallback diffusivity [m^2/s] for the particle moment scalars, used
     #: only where no particles are present yet (N or mM == 0). Everywhere
     #: particles exist, the actual diffusivity is instead computed at each
