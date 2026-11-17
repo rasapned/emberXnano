@@ -1234,7 +1234,9 @@ class TerminationCondition(Options):
       every particle moment M, `||dM/dt|| / sqrt(nPoints) / max|M|` is less
       than *momentsTol* [1/s]. Requires particles (``Particles.nMoments`` >
       0); useful when the temperature is prescribed (dT/dt = 0) or the
-      particle fields settle more slowly than the flame.
+      particle fields settle more slowly than the flame. Grid points where
+      M is below *momentsFloor* times max|M| are left out (e.g. the
+      near-zero, flickering values at an evaporation front).
     """
 
     tEnd = FloatOption(0.8)  #:
@@ -1246,6 +1248,7 @@ class TerminationCondition(Options):
     tMin = FloatOption(0.0, level=1) #:
     dTdtTol = FloatOption(10.0) #:
     momentsTol = FloatOption(1.0) #:
+    momentsFloor = FloatOption(0.0, min=0, level=1) #:
 
 
 class Config(object):

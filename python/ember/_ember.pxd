@@ -109,6 +109,7 @@ cdef extern from "readConfig.h":
         double terminationTolerance, terminationAbsTol, terminationPeriod
         double termination_dTdtTol
         double termination_momentsTol
+        double termination_momentsFloor
 
         int errorStopCount
         cbool stopIfError

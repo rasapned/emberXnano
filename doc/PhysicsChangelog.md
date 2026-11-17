@@ -5,6 +5,41 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-17 — feat: floor for the moments termination check (staged)
+
+**Area:** numerics: termination
+
+**What changed (numerics):** the `'moments'` termination measure can leave out grid points where
+a moment is below a fraction `momentsFloor` of its peak. At an evaporation front the moments are
+near zero and flicker by ±0.1–0.3 % of the peak from step to step, which kept the RMS rate above
+`momentsTol` although the profiles were steady.
+
+**Equations:** with $\phi_m$ moment $m$ (per kg gas), $\dot\phi_m = $ sum of the operator rates
+(diffusion, convection, production, cross) and $f$ = `momentsFloor` [-]:
+
+$$
+\max_m \frac{1}{\max_j|\phi_{m,j}|}\sqrt{\frac{1}{N_{pts}}\sum_{j:\,\phi_{m,j}\ \ge\ f\max_j|\phi_{m,j}|}\dot\phi_{m,j}^2}
+\;<\;\texttt{momentsTol}\ [1/s]
+$$
+
+$N_{pts}$ stays the total number of points. $f = 0$ (default) gives the old measure except at
+points with $\phi_{m,j} < 0$, which are now also left out.
+
+**Discretisation / numerics:** evaluated in `checkTerminationCondition` after each step from
+`ddtDiff + ddtConv + ddtProd + ddtCross`; affects only when the run stops, not the solution.
+
+**Conservation & units:** none affected.
+
+**Code:** `flameSolver.cpp::checkTerminationCondition`; `TerminationCondition.momentsFloor`
+(`input.py`) → `ConfigOptions::termination_momentsFloor`.
+
+**Verification:** jet grid (158 runs) with `momentsFloor = 1e-3`; in the H→OH +20 kJ/mol jet case
+the profile at the 20 ms stop equals the 205 ms profile (ΣN and ΣY_p to 0.1 %).
+
+**Limits / open points:** with the default $f = 0$ the change is not strictly a no-op: negative
+(undershoot) values are excluded. A large $f$ can declare a run steady while the low-concentration
+tail still moves.
+
 ## 2026-11-12 — feat: surface-reaction heat modes; sticking molecules' sensible heat split with conduction (staged)
 
 **Area:** particles: energy (surface reactions, condensation, conduction)

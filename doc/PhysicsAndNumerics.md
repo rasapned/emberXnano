@@ -498,7 +498,9 @@ Checks start at `tMin`.
 - `'Q'`: the integrated heat release is steady to `tolerance` (RMS) over `steadyPeriod`.
 - `'dTdt'`: $\|T^{-1}\partial T/\partial t\|_2/\sqrt{N_{pts}} <$ `dTdtTol`.
 - `'moments'` (new, 37240fd), for a prescribed $T$:
-  $\max_m \|\dot\phi_m\|_2/\sqrt{N_{pts}}/\max_j|\phi_m| < \texttt{momentsTol}$ [1/s].
+  $\max_m \|\dot\phi_m\|_2/\sqrt{N_{pts}}/\max_j|\phi_m| < \texttt{momentsTol}$ [1/s]. The norm
+  runs only over points with $\phi_{m,j} \ge$ `momentsFloor` $\cdot\max_j|\phi_m|$ (default 0), so the
+  flickering near-zero values at an evaporation front do not hold the run.
 
 ## 7. Recent implementations (2026-09 → 2026-10)
 
@@ -517,6 +519,7 @@ Checks start at `tMin`.
 | 2026-11-12 | fix | surface sources of particles below $d_{min}$ evaluated for the same mass in $d_{min}$ particles: sinks first order in mass and $N$, no zero crossing at the evaporation front |
 | 2026-11-12 | particles | optional Kelvin limit on collision nucleation: $J_c \times \max(0, 1-p_{eq}(n_c)/p_1)$, no subcritical nuclei |
 | 2026-11-12 | particles | surface-reaction heat modes `'thermo'` / `'prescribed'` (OpenFOAM $\Delta H_r$); sticking molecules add $(1-\alpha_T)$ of their sensible heat (no double count with conduction); $d_{min}$ floor in heat transfer |
+| 2026-11-17 | numerics | `'moments'` termination: points below `momentsFloor` × peak left out of the RMS rate |
 
 ## 8. Known limitations / open points
 

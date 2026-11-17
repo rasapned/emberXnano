@@ -219,6 +219,11 @@ public:
     //! [terminationCondition.momentsTol]
     double termination_momentsTol;
 
+    //! points where a moment is below this fraction of its peak are left
+    //! out of the `moments` termination check
+    //! [terminationCondition.momentsFloor]
+    double termination_momentsFloor;
+
     //! period over which to require constant heat release rate
     //! [terminationCondition.steadyPeriod]
     double terminationPeriod;

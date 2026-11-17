@@ -674,6 +674,7 @@ cdef class ConfigOptions:
             opts.terminationAbsTol = TC.abstol
             opts.termination_dTdtTol = TC.dTdtTol
             opts.termination_momentsTol = TC.momentsTol
+            opts.termination_momentsFloor = TC.momentsFloor
 
 
 def _phaseEnthalpyTable(thermoFile, phaseSpecies, phaseRatio, metal, Tgrid):

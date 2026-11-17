@@ -541,11 +541,16 @@ bool FlameSolver::checkTerminationCondition(void)
     } else if (options.terminationMeasurement == "moments") {
         // Slowest particle moment: RMS rate of change relative to the
         // moment's peak value. Not converged while a moment is still zero.
+        // Points where the moment is below momentsFloor * peak (e.g. the
+        // near-zero values at an evaporation front) are left out.
         dmatrix ddt = ddtDiff + ddtConv + ddtProd + ddtCross;
         double value = 0;
         for (size_t m=0; m<nMoments; m++) {
             double peak = moments.row(m).abs().maxCoeff();
-            double rms = ddt.row(kMoments+m).matrix().norm() /
+            double floor = options.termination_momentsFloor * peak;
+            dvec rate = (moments.row(m) >= floor).select(
+                ddt.row(kMoments+m), 0.0);
+            double rms = rate.matrix().norm() /
                 sqrt(static_cast<double>(nPoints));
             value = (peak > 0) ? std::max(value, rms / peak) : INFINITY;
         }
