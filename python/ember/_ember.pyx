@@ -216,6 +216,337 @@ def writelog(text):
     CxxSingletonLogfile.write(stringify(text))
 
 
+cdef int _setParticleOptions(CxxParticleOptions* opts, particles, gas, general,
+                             int offset) except -1:
+    """
+    Fill *opts* from the :class:`Particles` options *particles* of one
+    population, whose moment rows start at row *offset* of the moment block.
+    """
+    bimodal = particles.model == 'bimodal'
+    opts.bimodal = bimodal
+    opts.offset = offset
+    opts.fractalDimension = particles.fractalDimension
+    opts.primaryDiameter = particles.primaryDiameter or 0.0
+    if particles.sintering is not None:
+        if not bimodal:
+            raise ValueError("Particles.sintering requires model = 'bimodal'.")
+        opts.sintering = True
+        opts.sinterA, opts.sinterTa = [float(v) for v in particles.sintering]
+    if bimodal:
+        # Fixed rows N1, N2, M2, A2 of a single material
+        if particles.nMoments:
+            raise ValueError("Particles(model='bimodal') has its own 4 moments;"
+                             " leave nMoments unset.")
+        unsupported = [name for name, value in (
+            ('energy', particles.energy),
+            ('surfaceReactions', particles.surfaceReactions),
+            ('evaporation', particles.evaporation),
+            ('primaryDiameter', particles.primaryDiameter))
+            if value]
+        if unsupported:
+            raise ValueError("Particles(model='bimodal') does not support %s."
+                             % ', '.join(unsupported))
+        nucleation = particles.nucleation
+        if (nucleation is None or nucleation.precursorSpecies.value or
+                nucleation.kelvinLimit.value or not
+                (nucleation.collisionSpeciesA.value or
+                 nucleation.conversionSpecies.value)):
+            raise ValueError("Particles(model='bimodal') requires nucleation"
+                             " by collision and/or monomer conversion (no CNT,"
+                             " no kelvinLimit).")
+        opts.nMoments = 4
+    else:
+        # The particle enthalpy is an extra moment after N, mM, mO
+        if particles.energy and particles.nMoments != 3:
+            raise ValueError("particles.energy requires nMoments = 3.")
+        opts.nMoments = particles.nMoments + (1 if particles.energy else 0)
+    opts.momentDiffusivity = particles.momentDiffusivity
+    opts.momentBCLeft = particles.momentBCLeft
+    opts.momentBCRight = particles.momentBCRight
+
+    # Particle material: metal + oxygen, densities of its phases
+    metal = particles.metal
+    if opts.nMoments > 0 and metal not in gas.element_names:
+        raise ValueError("particles.metal: element '%s' is not in the"
+                         " mechanism." % metal)
+    phases = [(float(p[0]), float(p[1])) for p in particles.phases]
+    if bimodal:
+        if len(phases) != 1 or phases[0][0] < 0 or phases[0][1] <= 0:
+            raise ValueError("Particles(model='bimodal'): phases must be the"
+                             " single particle material, [(O/metal ratio,"
+                             " density)]; got %r." % (phases,))
+    elif (not phases or phases[0][0] != 0.0 or
+            any(b[0] <= a[0] for a, b in zip(phases, phases[1:])) or
+            any(rho <= 0 for _, rho in phases)):
+        raise ValueError("particles.phases must be (O/metal ratio, density"
+                         "[, species]) entries with ascending ratios starting"
+                         " at 0 (pure metal) and positive densities; got %r."
+                         % (phases,))
+    opts.phaseRatio = [x for x, _ in phases]
+    opts.phaseDensity = [rho for _, rho in phases]
+    opts.metalWeight = cantera.Element(metal).weight
+    opts.oxygenWeight = cantera.Element('O').weight
+
+    # Particle energy: enthalpy tables of the phases [J per kmol metal]
+    opts.thermalAccommodation = particles.thermalAccommodation
+    opts.radiationAbsorption = particles.radiationAbsorption
+    opts.radiationTsurr = particles.radiationTsurr
+    evaporation = (particles.evaporation and
+                   len(particles.condensationSpecies) > 0)
+    kelvinLimit = (particles.nucleation is not None and
+                   particles.nucleation.kelvinLimit.value)
+    if particles.energy or evaporation or kelvinLimit:
+        if any(len(p) < 3 or not p[2] for p in particles.phases):
+            raise ValueError("particles.phases: with energy = True,"
+                             " evaporation = True or nucleation.kelvinLimit"
+                             " = True every phase needs its condensed"
+                             " species, as (ratio, density, [species]).")
+        Tgrid = np.arange(200.0, 5000.0 + 1.0, 2.0)
+        table, gibbs = _phaseEnthalpyTable(particles.thermoFile,
+                                           [list(p[2]) for p in particles.phases],
+                                           opts.phaseRatio, metal, Tgrid)
+        opts.particleThermoT = list(Tgrid)
+        opts.phaseEnthalpy = list(table.ravel())
+    if particles.energy:
+        if general.chemistryIntegrator != 'cvode':
+            print("Warning: the particle energy moment relaxes on ~us time"
+                  " scales; use chemistryIntegrator='cvode'.")
+    opts.coagulation = particles.coagulation
+    opts.coagulationEnhancement = particles.coagulationEnhancement
+    opts.minParticleDiameter = particles.minParticleDiameter
+
+    surfReactant, surfProduct = [], []
+    surfA, surfTa, surfDeltaH = [], [], []
+    surfDeltaM, surfDeltaO = [], []
+    surfDiameter = []
+    for reaction in particles.surfaceReactions:
+        dM, dO = reaction.particleChange(gas, metal)
+        if dO != 0 and particles.nMoments < 3:
+            raise ValueError(
+                "Particles.surfaceReactions: '%s -> %s' changes the"
+                " particle's oxygen content, which requires nMoments = 3."
+                % (reaction.reactant.value, reaction.product.value))
+        surfReactant.append(gas.species_index(reaction.reactant.value))
+        if reaction.product.value is None:
+            surfProduct.append(-1)
+        else:
+            surfProduct.append(gas.species_index(reaction.product.value))
+        surfA.append(reaction.A.value)
+        surfTa.append(reaction.Ta.value)
+        surfDeltaH.append(reaction.deltaH.value * 1000.0) # [J/kmol]
+        if (particles.surfaceReactionHeat == 'thermo' and
+                reaction.deltaH.value != 0.0):
+            raise ValueError(
+                "Particles.surfaceReactions: '%s -> %s' has deltaH = %g J/mol,"
+                " but with surfaceReactionHeat = 'thermo' the reaction heat"
+                " follows from the thermochemistry; set deltaH = 0 or"
+                " surfaceReactionHeat = 'prescribed'."
+                % (reaction.reactant.value, reaction.product.value,
+                   reaction.deltaH.value))
+        surfDeltaM.append(dM)
+        surfDeltaO.append(dO)
+        if particles.surfaceCollisionLimit:
+            surfDiameter.append(_speciesCollisionProperties(
+                gas, reaction.reactant.value)[1])
+        else:
+            surfDiameter.append(0.0)
+    opts.surfReactant = surfReactant
+    opts.surfProduct = surfProduct
+    opts.surfA = surfA
+    opts.surfTa = surfTa
+    opts.surfDeltaH = surfDeltaH
+    opts.surfPrescribedHeat = (particles.surfaceReactionHeat == 'prescribed')
+    opts.surfDeltaM = surfDeltaM
+    opts.surfDeltaO = surfDeltaO
+    opts.surfCollisionLimit = particles.surfaceCollisionLimit
+    opts.surfDiameter = surfDiameter
+
+    condSpecies, condDiameter = [], []
+    condDeltaM, condDeltaO = [], []
+    condPhase, condLnPsat, condMolarVolume = [], [], []
+    for name in particles.condensationSpecies:
+        composition = gas.species(name).composition
+        dM = int(composition.get(metal, 0))
+        dO = int(composition.get('O', 0))
+        if set(composition) - {metal, 'O'} or dM == 0:
+            raise ValueError(
+                "Particles.condensationSpecies: '%s' must contain the"
+                " particle metal '%s' and otherwise only O; found %r." %
+                (name, metal, composition))
+        if bimodal and abs(dO / dM - phases[0][0]) > 1e-6:
+            raise ValueError(
+                "Particles.condensationSpecies: '%s' (O/%s = %g) is not of"
+                " the bimodal particle material (O/%s = %g)."
+                % (name, metal, dO / dM, metal, phases[0][0]))
+        if dO != 0 and particles.nMoments < 3 and not bimodal:
+            raise ValueError(
+                "Particles.condensationSpecies: '%s' contains oxygen,"
+                " which requires nMoments = 3." % name)
+        k, d, _ = _speciesCollisionProperties(gas, name)
+        condSpecies.append(k)
+        condDiameter.append(d)
+        condDeltaM.append(dM)
+        condDeltaO.append(dO)
+
+        # Evaporation: saturation pressure of the molecule over the bulk
+        # phase with its O/metal ratio, dM (metal)_phase <-> k(g)
+        phase = -1
+        if evaporation:
+            for i, ratio in enumerate(opts.phaseRatio):
+                if abs(dO / dM - ratio) < 1e-6:
+                    phase = i
+        condPhase.append(phase)
+        if phase < 0:
+            condMolarVolume.append(0.0)
+            if evaporation:
+                condLnPsat.append(np.zeros(len(Tgrid)))
+                print("Warning: condensation species '%s' (O/%s = %g) has no"
+                      " matching particle phase; it does not evaporate." %
+                      (name, metal, dO / dM))
+            continue
+        thermo = gas.species(name).thermo
+        gGas = np.array([thermo.h(T) - T * thermo.s(T) for T in Tgrid])
+        condLnPsat.append(np.log(gas.reference_pressure) +
+                          (dM * gibbs[phase] - gGas) / (cantera.gas_constant * Tgrid))
+        condMolarVolume.append(gas.molecular_weights[k] /
+                               (opts.phaseDensity[phase] * cantera.avogadro))
+    opts.condSpecies = condSpecies
+    opts.condDiameter = condDiameter
+    opts.condDeltaM = condDeltaM
+    opts.condDeltaO = condDeltaO
+    opts.evaporation = evaporation
+    opts.condPhase = condPhase
+    opts.condLnPsat = list(np.ravel(condLnPsat)) if evaporation else []
+    opts.condMolarVolume = condMolarVolume
+    sigmaA, sigmaB = particles.surfaceTension
+    opts.surfaceTensionA = sigmaA
+    opts.surfaceTensionB = sigmaB
+
+    nucleation = particles.nucleation
+    opts.nucEfficiency = 1.0
+    opts.nucKelvinLimit = kelvinLimit
+    if nucleation is not None:
+        nucleation.validate(gas, metal)
+
+        nucSpeciesA, nucSpeciesB = [], []
+        nucStoichA, nucStoichB = [], []
+        nucMassPerEvent, nucOxygenMassPerEvent = [], []
+        nucCollisionPrefactor = []
+        nucAtomsPerEvent = []
+        stoichA = nucleation.stoichA.value
+        stoichB = nucleation.stoichB.value
+        for nameA, nameB in zip(nucleation.collisionSpeciesA.value,
+                                nucleation.collisionSpeciesB.value):
+            kA, dA, mA = _speciesCollisionProperties(gas, nameA)
+            kB, dB, mB = _speciesCollisionProperties(gas, nameB)
+            WA = gas.molecular_weights[kA]
+            WB = gas.molecular_weights[kB]
+
+            dAB = 0.5 * (dA + dB)
+            muAB = mA * mB / (mA + mB)
+            # Convert kmol/m^3 concentrations to molecule/m^3 and the
+            # resulting event rate back to kmol/m^3/s.
+            prefactor = (np.pi * dAB**2 *
+                         np.sqrt(8.0 * cantera.boltzmann / (np.pi * muAB)) *
+                         cantera.avogadro)
+
+            nucSpeciesA.append(kA)
+            nucSpeciesB.append(kB)
+            nucStoichA.append(stoichA)
+            nucStoichB.append(stoichB)
+            nucCollisionPrefactor.append(prefactor)
+            # Always derived, never user-specified: this is what preserves
+            # the exact invariant sum(Y) + mM + mO == 1.
+            nucMassPerEvent.append(stoichA * WA + stoichB * WB)
+            nucOxygenMassPerEvent.append(
+                (stoichA * gas.n_atoms(kA, 'O') + stoichB * gas.n_atoms(kB, 'O')) *
+                opts.oxygenWeight)
+            nucAtomsPerEvent.append(int(round(
+                stoichA * gas.n_atoms(kA, metal) +
+                stoichB * gas.n_atoms(kB, metal))))
+
+        if kelvinLimit:
+            # Equilibrium pressure of the metal monomer over a nucleus:
+            # p_sat over the pure-metal phase (metal(g) <-> metal_phase0),
+            # Kelvin factor applied in sourceSystem.cpp
+            monomers = [k for k, s in enumerate(gas.species())
+                        if s.composition == {metal: 1.0}]
+            if not monomers:
+                raise ValueError("Particles.nucleation.kelvinLimit: the"
+                                 " mechanism has no '%s' monomer species."
+                                 % metal)
+            kMon = monomers[0]
+            thermo = gas.species(kMon).thermo
+            gMon = np.array([thermo.h(T) - T * thermo.s(T) for T in Tgrid])
+            opts.nucMonomerSpecies = kMon
+            opts.nucLnPsatMonomer = list(
+                np.log(gas.reference_pressure) +
+                (gibbs[0] - gMon) / (cantera.gas_constant * Tgrid))
+            opts.nucMonomerVolume = (gas.molecular_weights[kMon] /
+                                     (opts.phaseDensity[0] * cantera.avogadro))
+
+        opts.nucAtomsPerEvent = nucAtomsPerEvent
+        opts.nucSpeciesA = nucSpeciesA
+        opts.nucSpeciesB = nucSpeciesB
+        opts.nucStoichA = nucStoichA
+        opts.nucStoichB = nucStoichB
+        opts.nucMassPerEvent = nucMassPerEvent
+        opts.nucOxygenMassPerEvent = nucOxygenMassPerEvent
+
+        convSpecies, convOxygenMass = [], []
+        for name in nucleation.conversionSpecies.value:
+            k = gas.species_index(name)
+            convSpecies.append(k)
+            convOxygenMass.append(gas.n_atoms(k, 'O') * opts.oxygenWeight)
+        opts.convSpecies = convSpecies
+        opts.convOxygenMass = convOxygenMass
+        opts.convRate = nucleation.conversionRate.value or 0.0
+        if bimodal:
+            # One material: every nucleus has the same composition and mass
+            # (the mode-1 particle); its diameter follows from the density
+            for k in (nucSpeciesA + nucSpeciesB + convSpecies):
+                ratio = gas.n_atoms(k, 'O') / gas.n_atoms(k, metal)
+                if abs(ratio - phases[0][0]) > 1e-6:
+                    raise ValueError(
+                        "Particles.nucleation: '%s' (O/%s = %g) is not of the"
+                        " bimodal particle material (O/%s = %g)."
+                        % (gas.species_name(k), metal, ratio, metal, phases[0][0]))
+            masses = nucMassPerEvent + [gas.molecular_weights[k] for k in convSpecies]
+            if max(masses) - min(masses) > 1e-9 * max(masses):
+                raise ValueError("Particles(model='bimodal'): all nucleation"
+                                 " channels must form nuclei of the same mass"
+                                 " (the mode-1 particle); got %r kg/kmol." % masses)
+            opts.monomerMass = masses[0] / cantera.avogadro
+            opts.monomerDiameter = (6.0 * opts.monomerMass /
+                                    (np.pi * phases[0][1])) ** (1.0 / 3.0)
+        elif (any(nucOxygenMassPerEvent) or any(convOxygenMass)) and particles.nMoments < 3:
+            raise ValueError("Particles.nucleation: nucleating species"
+                             " containing O require nMoments = 3.")
+        opts.nucCollisionPrefactor = nucCollisionPrefactor
+        opts.nucEfficiency = nucleation.efficiency.value
+
+        nucPrecursorSpecies = []
+        nucPrecursorAtomCount = []
+        nucMonomerIndex = -1
+        for name in nucleation.precursorSpecies.value:
+            k = gas.species_index(name)
+            atomCount = int(next(iter(gas.species(k).composition.values())))
+            if atomCount == 1:
+                nucMonomerIndex = len(nucPrecursorSpecies)
+            nucPrecursorSpecies.append(k)
+            nucPrecursorAtomCount.append(atomCount)
+
+        opts.nucPrecursorSpecies = nucPrecursorSpecies
+        opts.nucPrecursorAtomCount = nucPrecursorAtomCount
+        opts.nucMonomerIndex = nucMonomerIndex
+
+        A, B, C = nucleation.antoineCoeffs.value
+        opts.nucAntoineA, opts.nucAntoineB, opts.nucAntoineC = A, B, C
+        sA, sB = nucleation.surfaceTensionCoeffs.value
+        opts.nucSurfaceTensionA, opts.nucSurfaceTensionB = sA, sB
+    return 0
+
+
 cdef class ConfigOptions:
     def __cinit__(self, *args, **kwargs):
         self.opts = new CxxConfigOptions()
@@ -376,252 +707,29 @@ cdef class ConfigOptions:
         opts.addPointCount = self.grid.addPointCount
         opts.unstrainedDownstreamWidth = self.grid.unstrainedDownstreamWidth
 
-        # Particles (passive scalar moment transport)
-        # The particle enthalpy is an extra moment after N, mM, mO
-        if self.particles.energy and self.particles.nMoments != 3:
-            raise ValueError("particles.energy requires nMoments = 3.")
-        opts.nMoments = self.particles.nMoments + (1 if self.particles.energy else 0)
-        opts.momentDiffusivity = self.particles.momentDiffusivity
-        opts.momentBCLeft = self.particles.momentBCLeft
-        opts.momentBCRight = self.particles.momentBCRight
-
-        # Particle material: metal + oxygen, densities of its phases
-        metal = self.particles.metal
-        if self.particles.nMoments > 0 and metal not in self.gas.element_names:
-            raise ValueError("particles.metal: element '%s' is not in the"
-                             " mechanism." % metal)
-        phases = [(float(p[0]), float(p[1])) for p in self.particles.phases]
-        if (not phases or phases[0][0] != 0.0 or
-                any(b[0] <= a[0] for a, b in zip(phases, phases[1:])) or
-                any(rho <= 0 for _, rho in phases)):
-            raise ValueError("particles.phases must be (O/metal ratio, density"
-                             "[, species]) entries with ascending ratios starting"
-                             " at 0 (pure metal) and positive densities; got %r."
-                             % (phases,))
-        opts.phaseRatio = [x for x, _ in phases]
-        opts.phaseDensity = [rho for _, rho in phases]
-        opts.metalWeight = cantera.Element(metal).weight
-        opts.oxygenWeight = cantera.Element('O').weight
-
-        # Particle energy: enthalpy tables of the phases [J per kmol metal]
-        opts.thermalAccommodation = self.particles.thermalAccommodation
-        opts.radiationAbsorption = self.particles.radiationAbsorption
-        opts.radiationTsurr = self.particles.radiationTsurr
-        evaporation = (self.particles.evaporation and
-                       len(self.particles.condensationSpecies) > 0)
-        kelvinLimit = (self.particles.nucleation is not None and
-                       self.particles.nucleation.kelvinLimit.value)
-        if self.particles.energy or evaporation or kelvinLimit:
-            if any(len(p) < 3 or not p[2] for p in self.particles.phases):
-                raise ValueError("particles.phases: with energy = True,"
-                                 " evaporation = True or nucleation.kelvinLimit"
-                                 " = True every phase needs its condensed"
-                                 " species, as (ratio, density, [species]).")
-            Tgrid = np.arange(200.0, 5000.0 + 1.0, 2.0)
-            table, gibbs = _phaseEnthalpyTable(self.particles.thermoFile,
-                                               [list(p[2]) for p in self.particles.phases],
-                                               opts.phaseRatio, metal, Tgrid)
-            opts.particleThermoT = list(Tgrid)
-            opts.phaseEnthalpy = list(table.ravel())
-        if self.particles.energy:
-            if self.general.chemistryIntegrator != 'cvode':
-                print("Warning: the particle energy moment relaxes on ~us time"
-                      " scales; use chemistryIntegrator='cvode'.")
-        opts.coagulation = self.particles.coagulation
-        opts.coagulationEnhancement = self.particles.coagulationEnhancement
-        opts.minParticleDiameter = self.particles.minParticleDiameter
-
-        surfReactant, surfProduct = [], []
-        surfA, surfTa, surfDeltaH = [], [], []
-        surfDeltaM, surfDeltaO = [], []
-        surfDiameter = []
-        for reaction in self.particles.surfaceReactions:
-            dM, dO = reaction.particleChange(self.gas, metal)
-            if dO != 0 and self.particles.nMoments < 3:
-                raise ValueError(
-                    "Particles.surfaceReactions: '%s -> %s' changes the"
-                    " particle's oxygen content, which requires nMoments = 3."
-                    % (reaction.reactant.value, reaction.product.value))
-            surfReactant.append(self.gas.species_index(reaction.reactant.value))
-            if reaction.product.value is None:
-                surfProduct.append(-1)
-            else:
-                surfProduct.append(self.gas.species_index(reaction.product.value))
-            surfA.append(reaction.A.value)
-            surfTa.append(reaction.Ta.value)
-            surfDeltaH.append(reaction.deltaH.value * 1000.0) # [J/kmol]
-            if (self.particles.surfaceReactionHeat == 'thermo' and
-                    reaction.deltaH.value != 0.0):
-                raise ValueError(
-                    "Particles.surfaceReactions: '%s -> %s' has deltaH = %g J/mol,"
-                    " but with surfaceReactionHeat = 'thermo' the reaction heat"
-                    " follows from the thermochemistry; set deltaH = 0 or"
-                    " surfaceReactionHeat = 'prescribed'."
-                    % (reaction.reactant.value, reaction.product.value,
-                       reaction.deltaH.value))
-            surfDeltaM.append(dM)
-            surfDeltaO.append(dO)
-            if self.particles.surfaceCollisionLimit:
-                surfDiameter.append(_speciesCollisionProperties(
-                    self.gas, reaction.reactant.value)[1])
-            else:
-                surfDiameter.append(0.0)
-        opts.surfReactant = surfReactant
-        opts.surfProduct = surfProduct
-        opts.surfA = surfA
-        opts.surfTa = surfTa
-        opts.surfDeltaH = surfDeltaH
-        opts.surfPrescribedHeat = (self.particles.surfaceReactionHeat == 'prescribed')
-        opts.surfDeltaM = surfDeltaM
-        opts.surfDeltaO = surfDeltaO
-        opts.surfCollisionLimit = self.particles.surfaceCollisionLimit
-        opts.surfDiameter = surfDiameter
-
-        condSpecies, condDiameter = [], []
-        condDeltaM, condDeltaO = [], []
-        condPhase, condLnPsat, condMolarVolume = [], [], []
-        for name in self.particles.condensationSpecies:
-            composition = self.gas.species(name).composition
-            dM = int(composition.get(metal, 0))
-            dO = int(composition.get('O', 0))
-            if set(composition) - {metal, 'O'} or dM == 0:
-                raise ValueError(
-                    "Particles.condensationSpecies: '%s' must contain the"
-                    " particle metal '%s' and otherwise only O; found %r." %
-                    (name, metal, composition))
-            if dO != 0 and self.particles.nMoments < 3:
-                raise ValueError(
-                    "Particles.condensationSpecies: '%s' contains oxygen,"
-                    " which requires nMoments = 3." % name)
-            k, d, _ = _speciesCollisionProperties(self.gas, name)
-            condSpecies.append(k)
-            condDiameter.append(d)
-            condDeltaM.append(dM)
-            condDeltaO.append(dO)
-
-            # Evaporation: saturation pressure of the molecule over the bulk
-            # phase with its O/metal ratio, dM (metal)_phase <-> k(g)
-            phase = -1
-            if evaporation:
-                for i, ratio in enumerate(opts.phaseRatio):
-                    if abs(dO / dM - ratio) < 1e-6:
-                        phase = i
-            condPhase.append(phase)
-            if phase < 0:
-                condMolarVolume.append(0.0)
-                if evaporation:
-                    condLnPsat.append(np.zeros(len(Tgrid)))
-                    print("Warning: condensation species '%s' (O/%s = %g) has no"
-                          " matching particle phase; it does not evaporate." %
-                          (name, metal, dO / dM))
-                continue
-            thermo = self.gas.species(name).thermo
-            gGas = np.array([thermo.h(T) - T * thermo.s(T) for T in Tgrid])
-            condLnPsat.append(np.log(self.gas.reference_pressure) +
-                              (dM * gibbs[phase] - gGas) / (cantera.gas_constant * Tgrid))
-            condMolarVolume.append(self.gas.molecular_weights[k] /
-                                   (opts.phaseDensity[phase] * cantera.avogadro))
-        opts.condSpecies = condSpecies
-        opts.condDiameter = condDiameter
-        opts.condDeltaM = condDeltaM
-        opts.condDeltaO = condDeltaO
-        opts.evaporation = evaporation
-        opts.condPhase = condPhase
-        opts.condLnPsat = list(np.ravel(condLnPsat)) if evaporation else []
-        opts.condMolarVolume = condMolarVolume
-        sigmaA, sigmaB = self.particles.surfaceTension
-        opts.surfaceTensionA = sigmaA
-        opts.surfaceTensionB = sigmaB
-
-        nucleation = self.particles.nucleation
-        opts.nucEfficiency = 1.0
-        opts.nucKelvinLimit = kelvinLimit
-        if nucleation is not None:
-            nucleation.validate(self.gas, metal)
-
-            nucSpeciesA, nucSpeciesB = [], []
-            nucStoichA, nucStoichB = [], []
-            nucMassPerEvent = []
-            nucCollisionPrefactor = []
-            nucAtomsPerEvent = []
-            stoichA = nucleation.stoichA.value
-            stoichB = nucleation.stoichB.value
-            for nameA, nameB in zip(nucleation.collisionSpeciesA.value,
-                                    nucleation.collisionSpeciesB.value):
-                kA, dA, mA = _speciesCollisionProperties(self.gas, nameA)
-                kB, dB, mB = _speciesCollisionProperties(self.gas, nameB)
-                WA = self.gas.molecular_weights[kA]
-                WB = self.gas.molecular_weights[kB]
-
-                dAB = 0.5 * (dA + dB)
-                muAB = mA * mB / (mA + mB)
-                # Convert kmol/m^3 concentrations to molecule/m^3 and the
-                # resulting event rate back to kmol/m^3/s.
-                prefactor = (np.pi * dAB**2 *
-                             np.sqrt(8.0 * cantera.boltzmann / (np.pi * muAB)) *
-                             cantera.avogadro)
-
-                nucSpeciesA.append(kA)
-                nucSpeciesB.append(kB)
-                nucStoichA.append(stoichA)
-                nucStoichB.append(stoichB)
-                nucCollisionPrefactor.append(prefactor)
-                # Always derived, never user-specified: this is what preserves
-                # the exact invariant sum(Y) + mM + mO == 1.
-                nucMassPerEvent.append(stoichA * WA + stoichB * WB)
-                nucAtomsPerEvent.append(int(round(
-                    stoichA * self.gas.n_atoms(kA, metal) +
-                    stoichB * self.gas.n_atoms(kB, metal))))
-
-            if kelvinLimit:
-                # Equilibrium pressure of the metal monomer over a nucleus:
-                # p_sat over the pure-metal phase (metal(g) <-> metal_phase0),
-                # Kelvin factor applied in sourceSystem.cpp
-                monomers = [k for k, s in enumerate(self.gas.species())
-                            if s.composition == {metal: 1.0}]
-                if not monomers:
-                    raise ValueError("Particles.nucleation.kelvinLimit: the"
-                                     " mechanism has no '%s' monomer species."
-                                     % metal)
-                kMon = monomers[0]
-                thermo = self.gas.species(kMon).thermo
-                gMon = np.array([thermo.h(T) - T * thermo.s(T) for T in Tgrid])
-                opts.nucMonomerSpecies = kMon
-                opts.nucLnPsatMonomer = list(
-                    np.log(self.gas.reference_pressure) +
-                    (gibbs[0] - gMon) / (cantera.gas_constant * Tgrid))
-                opts.nucMonomerVolume = (self.gas.molecular_weights[kMon] /
-                                         (opts.phaseDensity[0] * cantera.avogadro))
-
-            opts.nucAtomsPerEvent = nucAtomsPerEvent
-            opts.nucSpeciesA = nucSpeciesA
-            opts.nucSpeciesB = nucSpeciesB
-            opts.nucStoichA = nucStoichA
-            opts.nucStoichB = nucStoichB
-            opts.nucMassPerEvent = nucMassPerEvent
-            opts.nucCollisionPrefactor = nucCollisionPrefactor
-            opts.nucEfficiency = nucleation.efficiency.value
-
-            nucPrecursorSpecies = []
-            nucPrecursorAtomCount = []
-            nucMonomerIndex = -1
-            for name in nucleation.precursorSpecies.value:
-                k = self.gas.species_index(name)
-                atomCount = int(next(iter(self.gas.species(k).composition.values())))
-                if atomCount == 1:
-                    nucMonomerIndex = len(nucPrecursorSpecies)
-                nucPrecursorSpecies.append(k)
-                nucPrecursorAtomCount.append(atomCount)
-
-            opts.nucPrecursorSpecies = nucPrecursorSpecies
-            opts.nucPrecursorAtomCount = nucPrecursorAtomCount
-            opts.nucMonomerIndex = nucMonomerIndex
-
-            A, B, C = nucleation.antoineCoeffs.value
-            opts.nucAntoineA, opts.nucAntoineB, opts.nucAntoineC = A, B, C
-            sA, sB = nucleation.surfaceTensionCoeffs.value
-            opts.nucSurfaceTensionA, opts.nucSurfaceTensionB = sA, sB
-
+        # Particles: one block of moment rows per population, in order
+        cdef CxxParticleOptions pop
+        opts.particles.clear()
+        momentAbsTolScale, momentEnforceMin = [], []
+        offset = 0
+        for particles in self.particleSets:
+            pop = CxxParticleOptions()
+            _setParticleOptions(&pop, particles, self.gas, self.general, offset)
+            opts.particles.push_back(pop)
+            for m in range(pop.nMoments):
+                # The particle enthalpy (row kH) is signed and in J/kg; the
+                # bimodal area A2 [m^2/kg] scales as the mass times the
+                # monomer area/mass, 6/(rho_p d1)
+                isH = particles.energy and m == 3
+                scale = particleEnthalpyTolScale if isH else 1.0
+                if pop.bimodal and m == 3:
+                    scale = 6.0 / (pop.phaseDensity[0] * pop.monomerDiameter)
+                momentAbsTolScale.append(scale)
+                momentEnforceMin.append(0 if isH else 1)
+            offset += pop.nMoments
+        opts.nMoments = offset
+        opts.momentAbsTolScale = momentAbsTolScale
+        opts.momentEnforceMin = momentEnforceMin
 
         # Times
         opts.tStart, opts.haveTStart = get(self.times.tStart, 0.0)
@@ -957,20 +1065,35 @@ cdef class FlameSolver:
         def __get__(self):
             return getArray_MatrixMap(self.solver.moments)
 
-    property numberDensity:
+    property nPopulations:
+        """Number of particle populations (:class:`Particles` objects)."""
+        def __get__(self):
+            return self.options.opts.particles.size()
+
+    def populationMoments(self, int i=0):
         """
-        Particle number density [particles/m^3], derived from the N moment
-        (``moments[0]``, transported internally as kmol of particles per kg
-        of gas -- consistent with the kmol convention used for gas species)
-        and the local gas density. This is purely a unit conversion of
-        already-computed state; the underlying transport/source terms are
+        Moment rows of particle population *i* (in the order of the
+        :class:`Particles` objects in the Config): N, mM[, mO[, H]].
+        """
+        cdef int offset = self.options.opts.particles.at(i).offset
+        cdef int n = self.options.opts.particles.at(i).nMoments
+        return self.moments[offset:offset+n]
+
+    def numberDensity(self, int i=0):
+        """
+        Particle number density [particles/m^3] of population *i*, derived
+        from its N moment (transported internally as kmol of particles per
+        kg of gas -- consistent with the kmol convention used for gas
+        species) and the local gas density. This is purely a unit conversion
+        of already-computed state; the underlying transport/source terms are
         unchanged.
         """
-        def __get__(self):
-            if self.nMoments == 0:
-                raise AttributeError(
-                    "numberDensity is unavailable: particles.nMoments == 0")
-            return self.moments[0, :] * self.rho * cantera.avogadro
+        moments = self.populationMoments(i)
+        if len(moments) == 0:
+            raise AttributeError(
+                "numberDensity is unavailable: particle population %d has"
+                " no moments" % i)
+        return moments[0, :] * self.rho * cantera.avogadro
 
     property nSpec:
         def __get__(self):
@@ -1004,41 +1127,92 @@ cdef class FlameSolver:
         def __get__(self):
             return getArray_Vec(self.solver.rho)
 
-    property particleDiameter:
-        """Mean single-particle diameter [m] implied by the N, mM, mO moments."""
-        def __get__(self):
-            return getArray_Vec(self.solver.particleDiameter)
+    def particleDiameter(self, int i=0):
+        """
+        Mean single-particle diameter [m] of population *i*, implied by its
+        N, mM, mO moments.
+        """
+        return getArray_Matrix(self.solver.particleDiameter)[i]
 
-    property particleOxygenRatio:
+    def particleOxygenRatio(self, int i=0):
         """
-        Particle-phase O/metal atomic ratio, from the mM (``moments[1]``) and
-        mO (``moments[2]``) moments. 0 where no metal is present, or for
-        pure-metal particles (``nMoments`` < 3).
+        Particle-phase O/metal atomic ratio of population *i*, from its mM
+        and mO moments. 0 where no metal is present, or for pure-metal
+        particles (``nMoments`` < 3).
         """
-        def __get__(self):
-            if self.nMoments < 2:
-                raise AttributeError(
-                    "particleOxygenRatio is unavailable: particles.nMoments < 2")
-            mM = self.moments[1, :]
-            if self.nMoments < 3:
-                return np.zeros_like(mM)
-            nM = mM / self.options.opts.metalWeight
-            nO = self.moments[2, :] / self.options.opts.oxygenWeight
-            return np.where(mM > 0, nO / np.where(mM > 0, nM, 1.0), 0.0)
+        moments = self.populationMoments(i)
+        if len(moments) < 2:
+            raise AttributeError(
+                "particleOxygenRatio is unavailable: particle population %d"
+                " has nMoments < 2" % i)
+        mM = moments[1, :]
+        if len(moments) < 3:
+            return np.zeros_like(mM)
+        nM = mM / self.options.opts.particles.at(i).metalWeight
+        nO = moments[2, :] / self.options.opts.particles.at(i).oxygenWeight
+        return np.where(mM > 0, nO / np.where(mM > 0, nM, 1.0), 0.0)
 
-    property particleTemperature:
+    def particleTemperature(self, int i=0):
         """
-        Particle temperature [K] from the enthalpy moment (``moments[3]``);
-        equal to the gas temperature without it (``particles.energy`` off) or
+        Particle temperature [K] of population *i* from its enthalpy moment;
+        equal to the gas temperature without it (``Particles.energy`` off) or
         where no particles are present.
         """
-        def __get__(self):
-            return getArray_Vec(self.solver.particleTemperature)
+        return getArray_Matrix(self.solver.particleTemperature)[i]
 
-    property particleDiffusivity:
-        """Particle Brownian diffusivity [m^2/s] (Stokes-Einstein-Cunningham)."""
-        def __get__(self):
-            return getArray_Vec(self.solver.particleDiffusivity)
+    def particleDiffusivity(self, int i=0, int m=0):
+        """
+        Particle Brownian diffusivity [m^2/s] (Stokes-Einstein-Cunningham) of
+        moment *m* of population *i* (the same for all moments of a
+        single-mode population; bimodal: m = 0 mode 1, m > 0 mode 2).
+        """
+        return getArray_Matrix(self.solver.particleDiffusivity)[
+            self.options.opts.particles.at(i).offset + m]
+
+    def bimodalGeometry(self, int i=0):
+        """
+        Derived quantities of bimodal particle population *i* (as in
+        ``src/particleUtils.cpp::aggregateGeometry``), as a dict of arrays:
+        ``numberDensity1``, ``numberDensity2`` [1/m^3] of the modes; of the
+        mode-2 aggregates ``primaryDiameter`` d_pp = 6 v/a [m],
+        ``primaryCount`` n_p = a^3/(36 pi v^2), ``collisionDiameter`` d_pp
+        n_p^(1/Df) [m] and ``volumeDiameter2`` (6 v/pi)^(1/3) [m]; and
+        ``massMeanDiameter`` [m], the mass-weighted mean of the mode-1
+        diameter and the mode-2 volume-equivalent diameter. 0 where a mode
+        is empty.
+        """
+        N1, N2, M2, A2 = self.populationMoments(i)
+        rhoP = self.options.opts.particles.at(i).phaseDensity[0]
+        m1 = self.options.opts.particles.at(i).monomerMass
+        d1 = self.options.opts.particles.at(i).monomerDiameter
+        Df = self.options.opts.particles.at(i).fractalDimension
+        NA = cantera.avogadro
+        # as src/particleUtils.cpp::bimodalAggregate: at least one aggregate
+        # per m^3, two monomers per aggregate, area between those of the
+        # volume-equivalent sphere and of the unsintered monomers
+        have = (N2 * self.rho * NA >= 1.0) & (M2 > 0)
+        nPerKg = np.where(have, N2 * NA, 1.0)
+        mp = np.where(have, np.maximum(M2 / nPerKg, 2.0 * m1), 0.0)
+        v = mp / rhoP
+        aSphere = np.pi**(1.0/3.0) * (6.0 * v)**(2.0/3.0)
+        aMax = mp / m1 * np.pi * d1**2
+        a = np.maximum(np.minimum(np.maximum(A2, 0.0) / nPerKg, aMax), aSphere)
+        aSafe = np.where(have, a, 1.0)
+        vSafe = np.where(have, v, 1.0)
+        dpp = np.where(have, 6.0 * v / aSafe, 0.0)
+        npri = np.where(have, np.maximum(aSafe**3 / (36.0 * np.pi * vSafe**2), 1.0), 0.0)
+        dv2 = (6.0 * v / np.pi)**(1.0/3.0)
+        M1 = np.maximum(N1, 0.0) * NA * m1
+        Mtot = M1 + np.maximum(M2, 0.0)
+        dMass = np.where(Mtot > 0, (M1 * d1 + np.maximum(M2, 0.0) * dv2) /
+                         np.where(Mtot > 0, Mtot, 1.0), 0.0)
+        return {'numberDensity1': N1 * self.rho * NA,
+                'numberDensity2': N2 * self.rho * NA,
+                'primaryDiameter': dpp,
+                'primaryCount': npri,
+                'collisionDiameter': dpp * npri**(1.0 / Df),
+                'volumeDiameter2': dv2,
+                'massMeanDiameter': dMass}
 
     property splitConstConv:
         def __get__(self):

@@ -5,6 +5,68 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-19 — feat: independent particle populations, monomer-conversion nucleation, bimodal model (staged)
+
+**Area:** particles: populations, nucleation, coagulation, sintering, condensation
+
+**What changed (physics):** several independent populations, one moment block each, coupled
+only through the gas. Nucleating species may contain O. A new "every precursor molecule is a
+particle" channel. A bimodal population model (Jeong & Choi 2003, as in Sellmann et al. 2019):
+fixed-size nuclei (mode 1) and fractal aggregates (mode 2), with Fuchs coagulation, sintering
+and condensation. Single-mode results are unchanged.
+
+**Equations:** monomer conversion of species $k$ at rate constant $k_c$ [1/s]:
+$J = k_c c_k$ [kmol m⁻³ s⁻¹], with $\dot N = J/\rho$, $\dot M_M = J(W_k-\nu_OW_O)/\rho$,
+$\dot M_O = J\nu_OW_O/\rho$ and $\dot Y_k = -JW_k/\rho$. For oxide collision nuclei the event
+mass splits the same way. Bimodal rows: $N_1, N_2$ [kmol/kg], $M_2$ [kg/kg], $A_2$ [m²/kg]. The
+nucleus mass $m_1$ is fixed and $d_1 = (6m_1/\pi\rho_p)^{1/3}$. With $n_i = N_i\rho N_A$ and
+$r = \max(m_2/m_1, 2)$:
+
+$$
+\dot n_1 = J_n - \tfrac12\beta_{11}n_1^2\tfrac{r}{r-1} - \beta_{12}n_1n_2,\quad
+\dot n_2 = \tfrac12\beta_{11}n_1^2\tfrac{1}{r-1} - \tfrac12\beta_{22}n_2^2,\quad
+\dot{(\rho M_2)} = S\,m_1 + \textstyle\sum_k W_kR_k,
+$$
+
+$$
+\dot{(\rho A_2)} = S\,\pi d_1^2 - \rho\frac{A_2-A_s}{\tau} + \sum_k\frac{4W_kR_k}{d_{pp}\rho_p},\quad
+S = \tfrac12\beta_{11}n_1^2\tfrac{r}{r-1}+\beta_{12}n_1n_2,\quad
+\tau = A\,T d_{pp}^4 e^{T_a/T}
+$$
+
+Here $J_n$ = nucleated mass / $m_1$. $\beta_{ij}$ is the Fuchs kernel (Seinfeld) at collision
+diameters $d_c = d_{pp}n_p^{1/D_f}$, with $d_{pp} = 6v/a$ and $n_p = a^3/(36\pi v^2)$. $R_k$ is
+the hard-sphere rate of §4.4(e) at $d_c$. $A_s$ is the area of the volume-equivalent spheres.
+
+**Discretisation / numerics:** the sources live in the production operator (CVODE BDF).
+Tolerances are set per row (`momentAbsTolScale`: H ×1e7, A₂ × $6/(\rho_pd_1)$). Diffusivity is
+set per row: N₁ at $d_1$, mode 2 at $d_c$ (Kruis).
+
+**Conservation & units:** gas + particle mass is conserved exactly by every source. All units
+are kmol-based ($N_A$ = 6.022e26).
+
+**Code:** `sourceSystem.cpp::computeParticleSources`, `::computeBimodalRates`;
+`particleUtils.cpp::fuchsCoagulationKernel`, `aggregateGeometry`, `bimodalCoagulation`,
+`bimodalAggregate`, `fractalCollisionDiameter`. Options: `Particles(name, model,
+fractalDimension, sintering, primaryDiameter)`, `NucleationChannel(conversionSpecies,
+conversionRate)`.
+
+**Verification:**
+- The two single-population cases are bit-identical to the previous code.
+- 8 gtest unit tests: Fuchs limits, aggregate geometry, number/volume conservation, constant
+  kernel.
+- Jet candidate (a) with an added late Fe₂O₃ population: extinction moves 8.57 → 8.29 mm and the
+  metrics by under 2 %. An empty late population changes nothing (8.57 mm).
+
+**Limits / open points:**
+- Sintering acts from both sides ($A_2 < A_s$ is pushed back up). The one-sided form of the
+  paper ran away under balanced splitting.
+- Mode 2 counts as empty below 1 aggregate/m³, and its area is bounded between that of the
+  sphere and that of the unsintered monomers.
+- Mode-1 particles do not grow by condensation.
+- With no wall deposition, late mass piles up at the jet wall (3× the gas Fe at x = 0).
+- The paper gives no τ.
+
 ## 2026-11-17 — feat: optional collision-rate cap on surface reactions (staged)
 
 **Area:** particles: surface reactions

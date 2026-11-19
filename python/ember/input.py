@@ -455,8 +455,8 @@ class Grid(Options):
 
 class NucleationChannel(Options):
     """
-    Two-way coupled gas-to-particle nucleation. Both mechanisms below may be
-    enabled at once; each contributes production to the N and V moments
+    Two-way coupled gas-to-particle nucleation. The mechanisms below may be
+    enabled at once; each contributes production to the N and mass moments
     (and consumes gas species) in
     ``src/sourceSystem.cpp::computeNucleationRates()``.
     """
@@ -466,7 +466,9 @@ class NucleationChannel(Options):
     #: ``collisionSpeciesA[i]`` with ``collisionSpeciesB[i]`` (equal for a
     #: homomolecular collision, e.g. Fe + Fe). Must be the same length.
     #: Collision diameters and molecular masses are looked up from the
-    #: mechanism's transport data.
+    #: mechanism's transport data. The species contain the particle metal
+    #: and otherwise only O (e.g. FE2O3 + FE2O3); O-containing species
+    #: require ``Particles.nMoments`` = 3 (their O goes to mO).
     collisionSpeciesA = Option([])
     collisionSpeciesB = Option([])
 
@@ -488,6 +490,21 @@ class NucleationChannel(Options):
     #: then not formed. Requires the condensed species in *Particles.phases*
     #: and a metal monomer species (e.g. Fe) in the mechanism.
     kelvinLimit = BoolOption(False, level=1)
+
+    # ========= Monomer conversion ===========
+
+    #: Gas species converted into particles one molecule at a time: each
+    #: molecule of these species becomes a particle (a monomer), at the rate
+    #: ``conversionRate * C_k`` [kmol/m^3/s]. This is the "every precursor
+    #: molecule is a particle" assumption (e.g. FE2O3 forming iron oxide
+    #: particles). The species contain the particle metal and otherwise only
+    #: O; O-containing species require ``Particles.nMoments`` = 3.
+    conversionSpecies = Option([])
+
+    #: First-order rate constant [1/s] of the monomer conversion; required
+    #: with *conversionSpecies*. Fast conversion (large values) makes the
+    #: source terms stiff: use ``chemistryIntegrator='cvode'``.
+    conversionRate = FloatOption(None, min=0)
 
     # ======== Classical nucleation theory (CNT) =========
 
@@ -529,12 +546,21 @@ class NucleationChannel(Options):
                 "Particles.nucleation: precursorSpecies must include the"
                 " monomer (single-atom) species, e.g. '%s'." % metal)
 
-        for name in (self.collisionSpeciesA.value + self.collisionSpeciesB.value):
-            if set(gas.species(name).composition) != {metal}:
+        for name in (self.collisionSpeciesA.value + self.collisionSpeciesB.value
+                     + self.conversionSpecies.value):
+            composition = gas.species(name).composition
+            if set(composition) - {metal, 'O'} or metal not in composition:
                 raise ValueError(
-                    "Particles.nucleation: collision species '%s' must contain"
-                    " only the particle metal '%s' (homogeneous nucleation of"
-                    " oxides is not supported)." % (name, metal))
+                    "Particles.nucleation: nucleating species '%s' must contain"
+                    " the particle metal '%s' and otherwise only O; found %r."
+                    % (name, metal, composition))
+            if self.kelvinLimit.value and set(composition) != {metal}:
+                raise ValueError(
+                    "Particles.nucleation: kelvinLimit applies to pure-metal"
+                    " nuclei only; '%s' contains O." % name)
+        if self.conversionSpecies.value and not self.conversionRate.value:
+            raise ValueError("Particles.nucleation: conversionSpecies requires"
+                             " a positive conversionRate.")
 
 
 class SurfaceReaction(Options):
@@ -623,7 +649,57 @@ class Particles(Options):
     O). The particle size follows from the mass per particle and a density
     interpolated between the material *phases* according to the O/metal
     ratio.
+
+    Several independent particle populations (e.g. early and late
+    particles) are simulated by passing several :class:`Particles` objects
+    to :class:`Config`, each with its own *name*. Every population has its
+    own moments and switches; populations interact only through the gas
+    phase (each consumes and releases gas species on its own).
     """
+
+    #: Name of the population. Output keys of a named population get the
+    #: suffix ``_<name>`` (``moments_late``, ``numberDensity_late``, ...);
+    #: an unnamed population (default, at most one) uses the plain keys.
+    #: Names must be unique.
+    name = StringOption('')
+
+    #: Particle model. 'single' (default): one mode, moments N, mM[, mO[,
+    #: H]] (see *nMoments*, *energy*). 'bimodal' (Jeong & Choi 2003, as in
+    #: Sellmann et al. 2019): mode 1 holds the nuclei, of fixed size (moment
+    #: N1 [kmol / kg gas]); mode 2 the aggregates formed by their
+    #: coagulation (number N2 [kmol / kg gas], mass M2 [kg / kg gas] and
+    #: surface area A2 [m^2 / kg gas]). The bimodal particles are a single
+    #: material, the one entry of *phases* ``[(O/metal ratio, density)]``;
+    #: all nucleation channels must form nuclei of the same mass (the mode-1
+    #: particle, whose diameter follows from the density). Phenomena:
+    #: nucleation (collision and monomer conversion), *coagulation* within
+    #: and between the modes (Fuchs kernel with the fractal collision
+    #: diameter of the aggregates, *fractalDimension*), *sintering* of the
+    #: aggregate surface and condensation (*condensationSpecies*, of the
+    #: particle material, onto mode 2). *nMoments* is not used.
+    model = StringOption('single', ('bimodal',))
+
+    #: Fractal dimension Df of aggregates of primary particles of diameter
+    #: d_pp: collision diameter d_c = d_pp n_p^(1/Df) for n_p primaries (Kruis
+    #: et al. 1993), used in coagulation and diffusion. Applies to the
+    #: bimodal mode-2 aggregates, and to single-mode particles with
+    #: *primaryDiameter*.
+    fractalDimension = FloatOption(1.8, min=1, max=3, level=1)
+
+    #: Single mode: prescribed primary particle diameter [m]. Particles of
+    #: volume-equivalent diameter d_v > d_pp are taken as fractal aggregates
+    #: of (d_v/d_pp)^3 primaries, with collision diameter d_pp
+    #: (d_v/d_pp)^(3/Df) for coagulation and diffusion. ``None`` (default):
+    #: compact spheres.
+    primaryDiameter = FloatOption(None, min=0, level=1)
+
+    #: Bimodal: sintering of the aggregates, ``(A, Ta)``: A2 relaxes to the
+    #: surface of volume-equivalent spheres, ``dA2/dt = -(A2 - As)/tau``, with
+    #: ``tau = A * T * d_pp^4 * exp(Ta/T)`` [s] (Kruis et al. 1993 form; A in
+    #: s/(K m^4), Ta in K; their TiO2 values are 7.44e16, 31000). The values
+    #: depend on the material and must be given. ``None`` (default): no
+    #: sintering, the aggregates keep their surface.
+    sintering = Option(None, level=1)
 
     #: Number of particle moment scalars to transport: 0 (default) disables
     #: the particle module, 2 transports pure-metal particles (N, mM), 3 also
@@ -1267,13 +1343,22 @@ class Config(object):
     """
     def __init__(self, *args):
         opts = {}
+        particleSets = []
         for arg in args:
             if not isinstance(arg, Options):
                 raise TypeError('%r is not an instance of class Options' % arg)
+            if isinstance(arg, Particles):
+                # several particle populations are allowed
+                particleSets.append(arg)
+                continue
             name = arg.__class__.__name__
             if name in opts:
                 raise ValueError('Multiple instances of class %r encountered' % name)
             opts[name] = arg
+        names = [p.name.value for p in particleSets]
+        if len(set(names)) != len(names):
+            raise ValueError('Particles: population names must be unique'
+                             ' (at most one unnamed); got %r' % names)
 
         get = lambda cls: opts.get(cls.__name__) or cls()
 
@@ -1281,7 +1366,10 @@ class Config(object):
         self.general = get(General)
         self.chemistry = get(Chemistry)
         self.grid = get(Grid)
-        self.particles = get(Particles)
+        #: All particle populations, in the order of their moment rows;
+        #: *particles* is the first one (or an empty default)
+        self.particleSets = particleSets or [Particles()]
+        self.particles = self.particleSets[0]
         self.initialCondition = get(InitialCondition)
         self.wallFlux = opts.get('WallFlux')
         self.ignition = get(Ignition)
@@ -1301,9 +1389,14 @@ class Config(object):
         return ConcreteConfig(self)
 
     def __iter__(self):
-        for item in self.__dict__.values():
+        for name, item in self.__dict__.items():
+            if name == 'particles':
+                continue # listed in particleSets
             if isinstance(item, Options):
                 yield item
+            elif name == 'particleSets':
+                for p in item:
+                    yield p
 
     def stringify(self):
         ans = []
@@ -1353,7 +1446,7 @@ class Config(object):
                       " StrainParameters.function.")
 
         if (self.terminationCondition.measurement == 'moments' and
-            self.particles.nMoments.value == 0):
+            all(p.nMoments.value == 0 for p in self.particleSets)):
             error = True
             print("Error: TerminationCondition measurement 'moments' requires"
                   " particles (Particles.nMoments > 0).")
@@ -1516,18 +1609,25 @@ class ConcreteConfig(_ember.ConfigOptions):
         super(ConcreteConfig, self).__init__()
         self.original = config
 
-        for name, opts in config.__dict__.items():
-            if isinstance(opts, Options):
-                group = opts.__class__()
-                group.original = opts
-                setattr(self, name, group)
+        def concrete(opts):
+            group = opts.__class__()
+            group.original = opts
+            for name in dir(opts):
+                opt = getattr(opts, name)
+                if isinstance(opt, Option):
+                    setattr(group, name, opt.value)
+            return group
 
-                for name in dir(opts):
-                    opt = getattr(opts, name)
-                    if isinstance(opt, Option):
-                        setattr(group, name, opt.value)
+        for name, opts in config.__dict__.items():
+            if name == 'particles':
+                continue # first entry of particleSets
+            if isinstance(opts, Options):
+                setattr(self, name, concrete(opts))
+            elif name == 'particleSets':
+                self.particleSets = [concrete(p) for p in opts]
             elif opts is None:
                 setattr(self, name, None)
+        self.particles = self.particleSets[0]
 
         self.gas = cantera.Solution(self.chemistry.mechanismFile,
                                     self.chemistry.phaseID,

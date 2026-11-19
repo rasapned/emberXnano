@@ -130,7 +130,12 @@ The moments are mass-specific, like $Y_k$. All of them obey the same transport e
 | `kH`=3 | $H$ | absolute particle enthalpy (only with `energy=True`) | J / kg gas |
 
 - Number density: $n_p = N\rho N_A$, with Cantera's $N_A = 6.022\times10^{26}\,\mathrm{kmol^{-1}}$.
-- Exact invariant of all source terms: $\sum_k Y_k + M_M + M_O = 1$.
+- Exact invariant of all source terms: $\sum_k Y_k + \sum_{pop}(M_M + M_O) = 1$.
+- **Populations** (2026-11-19): every `Particles(name=...)` object is an independent population
+  with its own block of rows (`ParticleOptions.offset`, `.nMoments`). The indices above are
+  relative to that block. Populations interact only through the gas.
+- **Bimodal populations** (`model='bimodal'`, §4.6) use the rows `kN1`=0 $N_1$ [kmol/kg],
+  `kN2`=1 $N_2$ [kmol/kg], `kM2`=2 $M_2$ [kg/kg] and `kA2`=3 $A_2$ [m²/kg gas].
 
 ### 4.2 Transport (`flameSolver.cpp::prepareIntegrators`, `updateParticleDiffusivity`)
 
@@ -150,7 +155,12 @@ Kn = \frac{2\lambda_g}{d_p},\quad
 \lambda_g = \frac{\mu}{p}\sqrt{\frac{\pi R_u T}{2W}}
 $$
 
-  with $d_p \ge d_{min}$, and $D_p =$ `momentDiffusivity` where no particles exist.
+  with $d_p \ge d_{min}$, and $D_p =$ `momentDiffusivity` where no particles exist. $D_p$ is
+  set per moment row:
+  - single mode with `primaryDiameter` $d_{pp}$: evaluated at the fractal collision diameter
+    $d_{pp}(d_p/d_{pp})^{3/D_f}$;
+  - bimodal: $N_1$ at $d_1$, and the mode-2 rows at the aggregate collision diameter $d_c$
+    (§4.6).
 - *Fix 9206616:* the diffusion coefficient is $\rho D_p$, with prefactor $B = 1/\rho$. Before
   the fix it was $D_p/\rho$, which is 30–200× too fast at 3000 Pa.
 
@@ -204,7 +214,18 @@ $$
 $$
 
 Here $c_A, c_B$ are concentrations [kmol/m³], and $d$, $\mu_{AB}$ come from the mechanism's
-transport data.
+transport data. Collision species may also contain O (2026-11-19, `nMoments=3`): the O mass of
+the event, $(\nu_A n_{O,A}+\nu_B n_{O,B})W_O$, goes to $M_O$ and the rest to $M_M$.
+
+**(a′) Monomer conversion** (`conversionSpecies`, `conversionRate` $k_c$ [1/s], 2026-11-19).
+Every molecule of species $k$ becomes one particle:
+
+$$
+J = k_c c_k,\quad \dot N = J/\rho,\quad \dot M_M + \dot M_O = JW_k/\rho\ \text{(split by
+composition)},\quad \dot Y_k = -JW_k/\rho,\quad \dot H = Jh_k/\rho
+$$
+
+Large $k_c$ is stiff, so use CVODE.
 
 Optional Kelvin limit (`NucleationChannel(kelvinLimit=True)`): each channel is multiplied by
 $\max(0, 1 - p_{eq}/p_1)$, $p_1$ the metal-monomer partial pressure and
@@ -290,6 +311,9 @@ evaporated mass below $1.1d_{min}$ removes $N$ as in (d).
 Sensitivity multipliers: `coagulationEnhancement` scales $\beta_c$ in (c),
 `NucleationChannel.efficiency` scales $J$ in (a).
 
+With `Particles(primaryDiameter=d_pp)` the kernel in (c) uses the fractal collision diameter
+$d_c = d_{pp}(d_p/d_{pp})^{3/D_f}$ for $d_p > d_{pp}$.
+
 ### 4.5 Particle energy and temperature (commit b98ce11, `energy=True`)
 
 $H$ is the absolute particle enthalpy, on the same reference as the gas NASA thermo.
@@ -344,6 +368,42 @@ $$
 
 - **Coupling:** the heat goes to the particle only. It is **not** fed back to the gas energy
   equation. The surface-reaction Arrhenius rates use $T_p$; collision rates use $T$.
+
+### 4.6 Bimodal populations (`model='bimodal'`, 2026-11-19, `computeBimodalRates`)
+
+The model is that of Jeong & Choi (2003), as used by Sellmann et al. (2019). The population is
+one material: the single entry of `phases`, $(x, \rho_p)$.
+
+- **Mode 1:** nuclei of fixed mass $m_1$, equal to the nucleation event mass (one molecule for
+  conversion, A + B for collision; all channels must agree), and $d_1 = (6m_1/\pi\rho_p)^{1/3}$.
+- **Mode 2:** aggregates, with per-particle $m_2 = M_2/(N_2N_A)$ (at least $2m_1$),
+  $v = m_2/\rho_p$ and $a = A_2/(N_2N_A)$. The area is bounded,
+  $a_{sphere}(v) \le a \le (m_2/m_1)\pi d_1^2$. The geometry is $d_{pp} = 6v/a$,
+  $n_p = a^3/(36\pi v^2)$ and $d_c = d_{pp}n_p^{1/D_f}$ (`fractalDimension`). Mode 2 counts as
+  empty below 1 aggregate/m³ (`bimodalAggregate`).
+
+With $n_i = N_i\rho N_A$ and $r = \max(m_2/m_1, 2)$:
+
+$$
+\begin{aligned}
+\dot n_1 &= J_n - S, &\quad
+\dot n_2 &= \tfrac12\beta_{11}n_1^2\tfrac{1}{r-1} - \tfrac12\beta_{22}n_2^2,\\
+\rho\dot M_2 &= S m_1 + \textstyle\sum_k W_kR_k, &\quad
+\rho\dot A_2 &= S\pi d_1^2 - \rho\frac{A_2-A_s}{\tau} + \textstyle\sum_k \frac{4W_kR_k}{d_{pp}\rho_p}
+\end{aligned}
+$$
+
+- **Coagulation:** $S = \tfrac12\beta_{11}n_1^2\,r/(r-1) + \beta_{12}n_1n_2$ is the rate at
+  which monomer units move to mode 2. $J_n$ is the nucleated mass rate (§4.4 a, a′) divided by
+  $m_1$.
+- **Fuchs kernel:** $\beta_{ij}$ (`fuchsCoagulationKernel`, Seinfeld Table 13.1) is evaluated at
+  the collision diameters $d_1$ and $d_c$, with Stokes–Einstein–Cunningham $D$, times
+  `coagulationEnhancement`.
+- **Sintering** (`sintering=(A, T_a)`, no default): $\tau = A\,T d_{pp}^4\exp(T_a/T)$, and
+  $A_s$ is the area of the volume-equivalent spheres. The relaxation acts on both sides of $A_s$.
+- **Condensation:** $R_k$ is the hard-sphere rate of §4.4(e) at $d_c$, for species of the
+  particle composition, onto mode 2 only.
+- **Not modelled:** energy, surface reactions, evaporation and CNT.
 
 ## 5. Boundary conditions
 
@@ -506,7 +566,7 @@ Checks start at `tMin`.
   runs only over points with $\phi_{m,j} \ge$ `momentsFloor` $\cdot\max_j|\phi_m|$ (default 0), so the
   flickering near-zero values at an evaporation front do not hold the run.
 
-## 7. Recent implementations (2026-09 → 2026-10)
+## 7. Recent implementations (2026-09 → 2026-11)
 
 | Commit | Kind | Physics / math change |
 |---|---|---|
@@ -525,6 +585,7 @@ Checks start at `tMin`.
 | 2026-11-12 | particles | surface-reaction heat modes `'thermo'` / `'prescribed'` (OpenFOAM $\Delta H_r$); sticking molecules add $(1-\alpha_T)$ of their sensible heat (no double count with conduction); $d_{min}$ floor in heat transfer |
 | 2026-11-17 | numerics | `'moments'` termination: points below `momentsFloor` × peak left out of the RMS rate |
 | 2026-11-17 | particles | optional cap of the surface rate coefficient at the hard-sphere gas–particle collision rate (`surfaceCollisionLimit`) |
+| 2026-11-19 | particles | independent populations (one moment block each, gas-coupled only); oxide collision nuclei and monomer-conversion nucleation $J = k_cc_k$; bimodal model (Fuchs kernel, fractal aggregates, two-sided sintering, condensation onto mode 2); single-mode `primaryDiameter` fractal collision diameter |
 
 ## 8. Known limitations / open points
 
@@ -536,7 +597,20 @@ Checks start at `tMin`.
   With the OpenFOAM heats (`'prescribed'`) $T_p$ runs away to the 5000 K table limit.
   $\alpha_T = 0.3$ is uncited; the conduction/source split of the sensible heat uses
   mixture-averaged conduction.
-- No thermophoresis, no wall deposition.
+- No thermophoresis, no wall deposition. With the bimodal late Fe₂O₃ particles in the jet case,
+  the mass piles up at the wall (3× the gas Fe at x = 0 by t = 0.22 s, not converging). There
+  the aggregates diffuse at ~1e-9 m²/s and gas Fe keeps converting into them.
+- Bimodal model (§4.6):
+  - Sellmann et al. (2019) give no sintering time, and $A, T_a$ for Fe₂O₃ are still to be found.
+  - $d_1$ comes from the bulk density (0.46 nm for Fe₂O₃; the paper uses 0.4 nm).
+  - Mode 1 does not grow by condensation.
+  - The paper's Eq. 4 uses $v_0$ where the area gain needs $a_0$; the code uses $\pi d_1^2$.
+- The single-mode coagulation kernel (§4.4c) is a harmonic mean, not the Fuchs transition
+  kernel used by the bimodal model.
+- Moment absolute tolerance: with `speciesAbsTol` ~1e-13, $N$ ~1e-13 kmol/kg at a particle front
+  is at tolerance level, so the mass per particle drifts there (up to 25 % seen). The bimodal
+  $A_2$ row (m²/kg, ~1e6 × the mass) is above `absvtol` even when it is noise, and drives grid
+  refinement.
 - Downstream of an evaporation front the moments stay slightly negative (N to ~−3 % of its
   peak): sub-tolerance values flip sign in the source stage, and balanced splitting carries the
   production rate into the transport stages.

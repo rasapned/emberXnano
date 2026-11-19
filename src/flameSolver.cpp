@@ -71,9 +71,13 @@ void FlameSolver::initialize(void)
     nVars = nSpec + 2 + nMoments;
     W.resize(nSpec);
     gas.getMolecularWeights(W);
-    // Set boundary conditions for particles (vector of nMoments values, each equal to opitions.<...>)
-    momentsLeft = dvec::Constant(nMoments, options.momentBCLeft);
-    momentsRight = dvec::Constant(nMoments, options.momentBCRight);
+    // Fixed boundary values of the particle moments, per population
+    momentsLeft.resize(nMoments);
+    momentsRight.resize(nMoments);
+    for (const ParticleOptions& p : options.particles) {
+        momentsLeft.segment(p.offset, p.nMoments).setConstant(p.momentBCLeft);
+        momentsRight.segment(p.offset, p.nMoments).setConstant(p.momentBCRight);
+    }
 
     // Get Initial Conditions
     loadProfile();
@@ -220,7 +224,7 @@ void FlameSolver::prepareIntegrators()
         for (size_t m=0; m<nMoments; m++) {
             DiffusionSystem& sys = diffusionTerms[kMoments+m];
             sys.B = rho.inverse();
-            sys.D = rho * particleDiffusivity;
+            sys.D = rho * particleDiffusivity.row(m).transpose();
         }
     } else {
         // Diffusion solvers: Energy and momentum
@@ -242,7 +246,7 @@ void FlameSolver::prepareIntegrators()
         // Diffusion solvers: Particle moments (passive scalars)
         for (size_t m=0; m<nMoments; m++) {
             DiffusionSystem& sys = diffusionTerms[kMoments+m];
-            sys.D = rho * particleDiffusivity;
+            sys.D = rho * particleDiffusivity.row(m).transpose();
             for (size_t j = 0; j <= jj; j++) {
                 sys.B[j] = 1 / (rho[j] * vzInterp->get(x[j], tNow));
             }
@@ -616,9 +620,13 @@ void FlameSolver::resizeAuxiliary()
     cpSpec.resize(nSpec, nPoints);
     rhoD.resize(nSpec, nPoints);
     Dkt.resize(nSpec, nPoints);
-    particleDiameter.setZero(nPoints);
-    particleTemperature = T;
-    particleDiffusivity.setConstant(nPoints, options.momentDiffusivity);
+    particleDiameter.setZero(options.particles.size(), nPoints);
+    particleTemperature.resize(options.particles.size(), nPoints);
+    particleTemperature.rowwise() = T.transpose();
+    particleDiffusivity.resize(nMoments, nPoints);
+    for (const ParticleOptions& p : options.particles) {
+        particleDiffusivity.middleRows(p.offset, p.nMoments) = p.momentDiffusivity;
+    }
     wDot.resize(nSpec, nPoints);
     hk.resize(nSpec, nPoints);
     jFick.setZero(nSpec, nPoints);
@@ -885,21 +893,35 @@ void FlameSolver::updateChemicalProperties(size_t j1, size_t j2)
 
 void FlameSolver::updateParticleDiameter()
 {
-    if (nMoments == 0) {
-        return;
-    }
-
-    for (size_t j = 0; j < nPoints; j++) {
-        double mO = (nMoments > kO) ? moments(kO, j) : 0.0;
-        particleDiameter[j] = computeParticleDiameter(
-            moments(kN, j), moments(kM, j), mO, options);
-    }
-
-    particleTemperature = T;
-    if (nMoments > kH) {
+    for (size_t i = 0; i < options.particles.size(); i++) {
+        const ParticleOptions& p = options.particles[i];
+        particleTemperature.row(i) = T.transpose();
+        if (p.nMoments == 0) {
+            continue;
+        }
+        const size_t k0 = p.offset; // first row of the population
+        if (p.bimodal) {
+            // collision diameter of the mode-2 aggregates (0 if none; as in
+            // SourceSystem::computeBimodalRates)
+            for (size_t j = 0; j < nPoints; j++) {
+                double mp, v, dpp, np, dc;
+                bimodalAggregate(moments(k0+kN2, j), moments(k0+kM2, j),
+                                 moments(k0+kA2, j), rho[j], p, mp, v, dpp, np, dc);
+                particleDiameter(i, j) = dc;
+            }
+            continue;
+        }
         for (size_t j = 0; j < nPoints; j++) {
-            particleTemperature[j] = ::particleTemperature(
-                moments(kH, j), moments(kM, j), moments(kO, j), T(j), options);
+            double mO = (p.nMoments > kO) ? moments(k0+kO, j) : 0.0;
+            particleDiameter(i, j) = computeParticleDiameter(
+                moments(k0+kN, j), moments(k0+kM, j), mO, p);
+        }
+        if (p.nMoments > kH) {
+            for (size_t j = 0; j < nPoints; j++) {
+                particleTemperature(i, j) = ::particleTemperature(
+                    moments(k0+kH, j), moments(k0+kM, j), moments(k0+kO, j),
+                    T(j), p);
+            }
         }
     }
 }
@@ -912,29 +934,43 @@ void FlameSolver::updateParticleDiffusivity()
 
     updateParticleDiameter();
 
-    const double kB_ = Cantera::Boltzmann;
-
-    for (size_t j = 0; j < nPoints; j++) {
-        double dp = particleDiameter[j]; // [m]
-
-        if (!(dp > 0)) {
-            // No particles present (yet) at this point -- fall back to the
-            // user-specified constant so the equation stays well posed.
-            particleDiffusivity[j] = options.momentDiffusivity;
+    for (size_t i = 0; i < options.particles.size(); i++) {
+        const ParticleOptions& p = options.particles[i];
+        if (p.nMoments == 0) {
             continue;
         }
+        for (size_t j = 0; j < nPoints; j++) {
+            double meanFreePath = gasMeanFreePath(mu[j], T[j], Wmx[j], options.pressure);
+            double dp = particleDiameter(i, j); // [m]
+            double D;
 
-        // Particles smaller than minParticleDiameter disintegrate, so a
-        // smaller mean size can only come from N/mass noise where both are
-        // near zero; since D_p ~ 1/dp^2 it would blow up the diffusivity.
-        dp = std::max(dp, options.minParticleDiameter);
+            if (!(dp > 0)) {
+                // No particles present (yet) at this point -- fall back to the
+                // user-specified constant so the equation stays well posed.
+                D = p.momentDiffusivity;
+            } else if (p.bimodal) {
+                // Kruis et al.: mobility of the aggregates from their
+                // collision diameter
+                D = particleDiffusivityFromDiameter(dp, T[j], mu[j], meanFreePath);
+            } else {
+                // Particles smaller than minParticleDiameter disintegrate, so a
+                // smaller mean size can only come from N/mass noise where both are
+                // near zero; since D_p ~ 1/dp^2 it would blow up the diffusivity.
+                dp = std::max(dp, p.minParticleDiameter);
+                dp = fractalCollisionDiameter(dp, p);
 
-        double meanFreePath = gasMeanFreePath(mu[j], T[j], Wmx[j], options.pressure);
-        double Kn = 2.0 * meanFreePath / dp;
-        double Cc = cunninghamSlipCorrection(Kn);
-
-        // Stokes-Einstein-Cunningham particle diffusivity.
-        particleDiffusivity[j] = kB_ * T[j] * Cc / (3.0 * M_PI * mu[j] * dp);
+                // Stokes-Einstein-Cunningham particle diffusivity.
+                D = particleDiffusivityFromDiameter(dp, T[j], mu[j], meanFreePath);
+            }
+            for (size_t m = 0; m < p.nMoments; m++) {
+                particleDiffusivity(p.offset+m, j) = D;
+            }
+            if (p.bimodal) {
+                // mode-1 particles have the fixed nucleus size
+                particleDiffusivity(p.offset+kN1, j) = particleDiffusivityFromDiameter(
+                    p.monomerDiameter, T[j], mu[j], meanFreePath);
+            }
+        }
     }
 }
 

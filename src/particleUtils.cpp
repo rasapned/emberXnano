@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-double particleOxygenRatio(double mM, double mO, const ConfigOptions& opts)
+double particleOxygenRatio(double mM, double mO, const ParticleOptions& opts)
 {
     if (!(mM > 0) || !(mO > 0)) {
         return 0.0;
@@ -13,7 +13,7 @@ double particleOxygenRatio(double mM, double mO, const ConfigOptions& opts)
     return (mO / opts.oxygenWeight) / (mM / opts.metalWeight);
 }
 
-double particleBulkDensity(double mM, double mO, const ConfigOptions& opts)
+double particleBulkDensity(double mM, double mO, const ParticleOptions& opts)
 {
     const std::vector<double>& xs = opts.phaseRatio;
     const std::vector<double>& rhos = opts.phaseDensity;
@@ -30,7 +30,7 @@ double particleBulkDensity(double mM, double mO, const ConfigOptions& opts)
 }
 
 double particleVolumeFromMoments(double N, double mM, double mO,
-                                 const ConfigOptions& opts)
+                                 const ParticleOptions& opts)
 {
     if (!(N > 0) || !(mM > 0)) {
         return 0.0;
@@ -50,13 +50,13 @@ double particleDiameterFromVolume(double vParticle)
 }
 
 double computeParticleDiameter(double N, double mM, double mO,
-                               const ConfigOptions& opts)
+                               const ParticleOptions& opts)
 {
     return particleDiameterFromVolume(particleVolumeFromMoments(N, mM, mO, opts));
 }
 
 void floorParticleSize(double& dp, double& nParticles, double* mp,
-                       const ConfigOptions& opts)
+                       const ParticleOptions& opts)
 {
     double dmin = opts.minParticleDiameter;
     if (!(dp < dmin)) {
@@ -73,7 +73,7 @@ void floorParticleSize(double& dp, double& nParticles, double* mp,
 namespace {
 // Phase segment [i, i+1] bracketing the O/metal ratio x, and the lever-rule
 // weight w of phase i+1 (w = 0 with i = last phase if there is only one).
-void phaseSegment(double x, const ConfigOptions& opts, size_t& i, double& w)
+void phaseSegment(double x, const ParticleOptions& opts, size_t& i, double& w)
 {
     const std::vector<double>& xs = opts.phaseRatio;
     size_t n = xs.size();
@@ -89,13 +89,13 @@ void phaseSegment(double x, const ConfigOptions& opts, size_t& i, double& w)
     w = (x - xs[i]) / (xs[i+1] - xs[i]);
 }
 
-double phaseTableValue(size_t phase, size_t n, const ConfigOptions& opts)
+double phaseTableValue(size_t phase, size_t n, const ParticleOptions& opts)
 {
     return opts.phaseEnthalpy[phase * opts.particleThermoT.size() + n];
 }
 }
 
-double particleEnthalpyPerMetal(double T, double x, const ConfigOptions& opts,
+double particleEnthalpyPerMetal(double T, double x, const ParticleOptions& opts,
                                 double* dhdx)
 {
     const std::vector<double>& Ts = opts.particleThermoT;
@@ -123,7 +123,7 @@ double particleEnthalpyPerMetal(double T, double x, const ConfigOptions& opts,
     return (1 - w) * hi + w * hj;
 }
 
-double phaseActivity(double x, int phase, const ConfigOptions& opts)
+double phaseActivity(double x, int phase, const ParticleOptions& opts)
 {
     if (opts.phaseRatio.size() < 2) {
         return (phase == 0) ? 1.0 : 0.0;
@@ -142,7 +142,7 @@ double phaseActivity(double x, int phase, const ConfigOptions& opts)
 namespace {
 // exp of a ln(p) table on opts.particleThermoT, interpolated linearly at T
 // (T clamped to the table range)
-double interpolateLnTable(const double* lnP, double T, const ConfigOptions& opts)
+double interpolateLnTable(const double* lnP, double T, const ParticleOptions& opts)
 {
     const std::vector<double>& Ts = opts.particleThermoT;
     size_t nT = Ts.size();
@@ -155,12 +155,12 @@ double interpolateLnTable(const double* lnP, double T, const ConfigOptions& opts
 }
 } // namespace
 
-double condensationSaturationPressure(size_t c, double T, const ConfigOptions& opts)
+double condensationSaturationPressure(size_t c, double T, const ParticleOptions& opts)
 {
     return interpolateLnTable(&opts.condLnPsat[c * opts.particleThermoT.size()], T, opts);
 }
 
-double nucleusEquilibriumPressure(int nAtoms, double T, const ConfigOptions& opts)
+double nucleusEquilibriumPressure(int nAtoms, double T, const ParticleOptions& opts)
 {
     double v1 = opts.nucMonomerVolume;
     double dn = std::cbrt(6.0 * nAtoms * v1 / M_PI); // nucleus diameter [m]
@@ -170,7 +170,7 @@ double nucleusEquilibriumPressure(int nAtoms, double T, const ConfigOptions& opt
 }
 
 double particleTemperature(double H, double mM, double mO, double Tgas,
-                           const ConfigOptions& opts)
+                           const ParticleOptions& opts)
 {
     if (!(mM > 0)) {
         return Tgas;
@@ -242,4 +242,92 @@ double monodisperseCoagulationKernel(double dc, double mp, double T,
 
     // Harmonic mean (Fuchs interpolation) between the two limits.
     return 1.0 / (1.0 / (ROOTVSMALL + fm) + 1.0 / (ROOTVSMALL + sf));
+}
+
+double particleDiffusivityFromDiameter(double dp, double T, double mu,
+                                       double meanFreePath)
+{
+    double Kn = 2.0 * meanFreePath / dp;
+    double Cc = cunninghamSlipCorrection(Kn);
+    return Cantera::Boltzmann * T * Cc / (3.0 * M_PI * mu * dp);
+}
+
+double fuchsCoagulationKernel(double di, double mi, double Di,
+                              double dj, double mj, double Dj, double T)
+{
+    const double kB_ = Cantera::Boltzmann;
+    // mean thermal speed, apparent mean free path and transition length
+    auto transition = [&](double d, double m, double D, double& c) {
+        c = std::sqrt(8.0 * kB_ * T / (M_PI * m));
+        double l = 8.0 * D / (M_PI * c);
+        return (std::pow(d + l, 3) - std::pow(d * d + l * l, 1.5)) /
+               (3.0 * d * l) - d;
+    };
+    double ci, cj;
+    double gi = transition(di, mi, Di, ci);
+    double gj = transition(dj, mj, Dj, cj);
+    double dSum = di + dj;
+    double DSum = Di + Dj;
+    double gij = std::sqrt(gi * gi + gj * gj);
+    double cij = std::sqrt(ci * ci + cj * cj);
+    return 2.0 * M_PI * DSum * dSum /
+           (dSum / (dSum + 2.0 * gij) + 8.0 * DSum / (cij * dSum));
+}
+
+void aggregateGeometry(double v, double a, double Df,
+                       double& dpp, double& np, double& dc)
+{
+    double aSphere = std::pow(M_PI, 1.0 / 3.0) * std::pow(6.0 * v, 2.0 / 3.0);
+    a = std::max(a, aSphere);
+    dpp = 6.0 * v / a;
+    np = std::max(a * a * a / (36.0 * M_PI * v * v), 1.0);
+    dc = dpp * std::pow(np, 1.0 / Df);
+}
+
+BimodalCoagulationRates bimodalCoagulation(double n1, double n2, double r,
+                                           double b11, double b12, double b22)
+{
+    r = std::max(r, 2.0);
+    double R11 = 0.5 * b11 * n1 * n1; // monomer-monomer collisions
+    double R12 = b12 * n1 * n2; // monomer-aggregate collisions
+    double R22 = 0.5 * b22 * n2 * n2; // aggregate-aggregate collisions
+    BimodalCoagulationRates rates;
+    rates.n1Loss = R11 * r / (r - 1.0) + R12;
+    rates.n2Gain = R11 / (r - 1.0);
+    rates.n2Loss = R22;
+    rates.monomersToMode2 = rates.n1Loss;
+    return rates;
+}
+
+double sinteringTime(double T, double dpp, double A, double Ta)
+{
+    return A * T * std::pow(dpp, 4) * std::exp(Ta / T);
+}
+
+double fractalCollisionDiameter(double dv, const ParticleOptions& opts)
+{
+    double dpp = opts.primaryDiameter;
+    if (dpp > 0 && dv > dpp) {
+        return dpp * std::pow(dv / dpp, 3.0 / opts.fractalDimension);
+    }
+    return dv;
+}
+
+bool bimodalAggregate(double N2, double M2, double A2, double rho,
+                      const ParticleOptions& opts, double& mp, double& v,
+                      double& dpp, double& np, double& dc)
+{
+    double nPerKg = N2 * Cantera::Avogadro; // [aggregates / kg gas]
+    if (!(nPerKg * rho >= 1.0 && M2 > 0)) {
+        mp = v = dpp = dc = 0.0;
+        np = 1.0;
+        return false;
+    }
+    const double m1 = opts.monomerMass, d1 = opts.monomerDiameter;
+    mp = std::max(M2 / nPerKg, 2.0 * m1);
+    v = mp / opts.phaseDensity[0];
+    double aMax = mp / m1 * M_PI * d1 * d1; // unsintered monomers
+    double a = std::min(std::max(A2, 0.0) / nPerKg, aMax);
+    aggregateGeometry(v, a, opts.fractalDimension, dpp, np, dc);
+    return true;
 }

@@ -262,7 +262,7 @@ private:
     double abstolT; //!< temperature absolute tolerance
     double abstolW; //!< molecular weight absolute tolerance
     double abstolY; //!< mass fraction absolute tolerance
-    double abstolMoment; //!< particle moment scalar absolute tolerance
+    std::vector<double> abstolMoment; //!< absolute tolerance of each particle moment row
 
     //! Solver for #utwSystem
     std::shared_ptr<SundialsCvode> utwSolver;

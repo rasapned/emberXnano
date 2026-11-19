@@ -110,22 +110,37 @@ class StateWriter(object):
             data['fileNumber'] = self.fileNumber
             self.write(data, ['x', 'T', 'U', 'Y', 'V', 'gridAlpha', 'a', 'dadt'])
 
-            # Particle moment scalars (passive-scalar transport), if enabled.
-            # numberDensity is derived from moments[0] (kmol particles / kg
-            # gas) and rho -- a pure unit conversion, not a solver state.
-            # particleDiameter/particleDiffusivity are the size and
-            # Stokes-Einstein-Cunningham diffusivity computed from the N, mM,
-            # mO moments each step (see updateParticleDiffusivity() in
-            # flameSolver.cpp) -- useful diagnostics, e.g. for spotting
-            # noisy diameter estimates where N, mM are both near zero.
-            if self.solver.nMoments > 0:
-                self.write(data, ['moments'])
-                data['numberDensity'] = self.solver.numberDensity
-                self.write(data, ['particleDiameter', 'particleDiffusivity'])
-            if self.solver.nMoments > 1:
-                data['particleOxygenRatio'] = self.solver.particleOxygenRatio
-            if self.solver.nMoments > 3:
-                self.write(data, ['particleTemperature'])
+            # Particle moment scalars (passive-scalar transport) of each
+            # particle population, if enabled: an unnamed population is
+            # written under the plain keys, a named one (Particles.name) with
+            # the suffix '_<name>'. numberDensity is derived from the N
+            # moment (kmol particles / kg gas) and rho -- a pure unit
+            # conversion, not a solver state. particleDiameter/
+            # particleDiffusivity are the size and Stokes-Einstein-Cunningham
+            # diffusivity computed from the N, mM, mO moments each step (see
+            # updateParticleDiffusivity() in flameSolver.cpp) -- useful
+            # diagnostics, e.g. for spotting noisy diameter estimates where N,
+            # mM are both near zero.
+            for i, particles in enumerate(self.options.particleSets):
+                moments = self.solver.populationMoments(i)
+                if len(moments) == 0:
+                    continue
+                suffix = '_' + particles.name if particles.name else ''
+                data['moments' + suffix] = moments
+                if particles.model == 'bimodal':
+                    # rows N1, N2, M2, A2 and the derived aggregate geometry
+                    for key, value in self.solver.bimodalGeometry(i).items():
+                        data[key + suffix] = value
+                    data['particleDiffusivity1' + suffix] = self.solver.particleDiffusivity(i, 0)
+                    data['particleDiffusivity2' + suffix] = self.solver.particleDiffusivity(i, 1)
+                    continue
+                data['numberDensity' + suffix] = self.solver.numberDensity(i)
+                data['particleDiameter' + suffix] = self.solver.particleDiameter(i)
+                data['particleDiffusivity' + suffix] = self.solver.particleDiffusivity(i)
+                if len(moments) > 1:
+                    data['particleOxygenRatio' + suffix] = self.solver.particleOxygenRatio(i)
+                if len(moments) > 3:
+                    data['particleTemperature' + suffix] = self.solver.particleTemperature(i)
 
             # extended information
             if self.options.outputFiles.heatReleaseRate or errorFile:

@@ -42,6 +42,63 @@ cdef extern from "chemistry0d.h":
     cdef void CxxAddCanteraDirectory "Cantera::addDirectory" (string&)
 
 cdef extern from "readConfig.h":
+    const double particleEnthalpyTolScale
+
+    cdef cppclass CxxParticleOptions "ParticleOptions":
+        CxxParticleOptions()
+        size_t offset, nMoments
+        cbool bimodal
+        double monomerMass, monomerDiameter
+        double fractalDimension
+        cbool sintering
+        double sinterA, sinterTa
+        double primaryDiameter
+        double momentDiffusivity, momentBCLeft, momentBCRight
+
+        vector[double] phaseRatio, phaseDensity
+        double metalWeight, oxygenWeight
+        cbool coagulation
+        double minParticleDiameter
+        vector[int] nucSpeciesA, nucSpeciesB
+        vector[int] nucStoichA, nucStoichB
+        vector[double] nucMassPerEvent, nucOxygenMassPerEvent
+        vector[double] nucCollisionPrefactor
+        vector[int] convSpecies
+        vector[double] convOxygenMass
+        double convRate
+
+        vector[int] surfReactant, surfProduct
+        vector[double] surfA, surfTa
+        vector[int] surfDeltaM, surfDeltaO
+        cbool surfCollisionLimit
+        vector[double] surfDiameter
+
+        vector[int] condSpecies
+        vector[double] condDiameter
+        vector[int] condDeltaM, condDeltaO
+        cbool evaporation
+        vector[int] condPhase
+        vector[double] condLnPsat, condMolarVolume
+        double surfaceTensionA, surfaceTensionB
+        double coagulationEnhancement
+        double nucEfficiency
+        cbool nucKelvinLimit
+        int nucMonomerSpecies
+        vector[int] nucAtomsPerEvent
+        vector[double] nucLnPsatMonomer
+        double nucMonomerVolume
+
+        vector[double] particleThermoT, phaseEnthalpy
+        double thermalAccommodation, radiationAbsorption, radiationTsurr
+        vector[double] surfDeltaH
+        cbool surfPrescribedHeat
+
+        vector[int] nucPrecursorSpecies
+        vector[int] nucPrecursorAtomCount
+        int nucMonomerIndex
+        double nucAntoineA, nucAntoineB, nucAntoineC
+        double nucSurfaceTensionA, nucSurfaceTensionB
+
     cdef cppclass CxxConfigOptions "ConfigOptions":
         void setContinuityBC(string&)
         void setLogFile(string&)
@@ -120,49 +177,10 @@ cdef extern from "readConfig.h":
 
         double centerGridMin
 
+        vector[CxxParticleOptions] particles
         int nMoments
-        double momentDiffusivity, momentBCLeft, momentBCRight
-
-        vector[double] phaseRatio, phaseDensity
-        double metalWeight, oxygenWeight
-        cbool coagulation
-        double minParticleDiameter
-        vector[int] nucSpeciesA, nucSpeciesB
-        vector[int] nucStoichA, nucStoichB
-        vector[double] nucMassPerEvent
-        vector[double] nucCollisionPrefactor
-
-        vector[int] surfReactant, surfProduct
-        vector[double] surfA, surfTa
-        vector[int] surfDeltaM, surfDeltaO
-        cbool surfCollisionLimit
-        vector[double] surfDiameter
-
-        vector[int] condSpecies
-        vector[double] condDiameter
-        vector[int] condDeltaM, condDeltaO
-        cbool evaporation
-        vector[int] condPhase
-        vector[double] condLnPsat, condMolarVolume
-        double surfaceTensionA, surfaceTensionB
-        double coagulationEnhancement
-        double nucEfficiency
-        cbool nucKelvinLimit
-        int nucMonomerSpecies
-        vector[int] nucAtomsPerEvent
-        vector[double] nucLnPsatMonomer
-        double nucMonomerVolume
-
-        vector[double] particleThermoT, phaseEnthalpy
-        double thermalAccommodation, radiationAbsorption, radiationTsurr
-        vector[double] surfDeltaH
-        cbool surfPrescribedHeat
-
-        vector[int] nucPrecursorSpecies
-        vector[int] nucPrecursorAtomCount
-        int nucMonomerIndex
-        double nucAntoineA, nucAntoineB, nucAntoineC
-        double nucSurfaceTensionA, nucSurfaceTensionB
+        vector[double] momentAbsTolScale
+        vector[int] momentEnforceMin
 
         cbool xFlameControl
         double xFlameInitial, xFlameFinal, xFlameDt, xFlameT0
@@ -292,9 +310,9 @@ cdef extern from "flameSolver.h":
         CxxEigenMatrix cpSpec
         CxxEigenMatrix rhoD
         CxxEigenMatrix Dkt
-        CxxEigenVec particleDiameter
-        CxxEigenVec particleTemperature
-        CxxEigenVec particleDiffusivity
+        CxxEigenMatrix particleDiameter
+        CxxEigenMatrix particleTemperature
+        CxxEigenMatrix particleDiffusivity
         CxxEigenMatrix hk
         CxxEigenMatrix jFick
         CxxEigenMatrix jSoret

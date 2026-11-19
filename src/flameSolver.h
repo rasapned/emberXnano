@@ -140,9 +140,15 @@ public:
     dvec cp; //!< mixture heat capacity [J/kg*K]
     dmatrix cpSpec; //!< species molar heat capacities [J/kmol*K]
     dmatrix rhoD; //!< density * diffusivity [kg/m*s]
-    dvec particleDiameter; //!< mean single-particle diameter implied by the N, mM, mO moments [m]
-    dvec particleTemperature; //!< particle temperature from the H moment [K] (gas T without it)
-    dvec particleDiffusivity; //!< particle Brownian diffusivity from Stokes-Einstein-Cunningham [m^2/s]
+    //! mean single-particle diameter implied by the N, mM, mO moments [m],
+    //! particleDiameter(i, j) for population i
+    dmatrix particleDiameter;
+    //! particle temperature from the H moment [K] (gas T without it),
+    //! particleTemperature(i, j) for population i
+    dmatrix particleTemperature;
+    //! particle Brownian diffusivity from Stokes-Einstein-Cunningham
+    //! [m^2/s], particleDiffusivity(m, j) for moment row m
+    dmatrix particleDiffusivity;
     dmatrix Dkt; //!< thermal diffusivity
     dmatrix hk; //!< species molar enthalpies [J/kmol]
     dmatrix jFick; //!< Fickian mass flux [kg/m^2*s]

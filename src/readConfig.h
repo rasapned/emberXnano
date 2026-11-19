@@ -2,6 +2,7 @@
 #include "mathUtils.h"
 
 #include <string>
+#include <vector>
 
 // indices of the respective equations / solution components
 const size_t kMomentum = 0;
@@ -22,6 +23,15 @@ const size_t kO = 2;
 // nMoments >= 4 here, where nMoments counts all moment rows). The particle
 // temperature follows from H and the mass moments.
 const size_t kH = 3;
+// Bimodal model (particles.model = 'bimodal'), relative to the population
+// block: mode-1 particles of fixed size (nuclei), N1 [kmol / kg gas], and
+// mode-2 aggregates: number N2 [kmol / kg gas], mass M2 [kg / kg gas] and
+// surface area A2 [m^2 / kg gas].
+const size_t kN1 = 0;
+const size_t kN2 = 1;
+const size_t kM2 = 2;
+const size_t kA2 = 3;
+
 //! Scale of the H moment [J/kg] relative to the mass-like moments, used to
 //! set its absolute integrator tolerances
 const double particleEnthalpyTolScale = 1e7;
@@ -37,6 +47,179 @@ namespace ContinuityBoundaryCondition {
         Wall //!< V = 0 at j = jj (impermeable wall; impinging jet)
     };
 }
+
+//! Options of one particle population [see input.py Particles]. Each
+//! population owns the moment rows offset .. offset+nMoments-1 of the moment
+//! block (state rows kSpecies+nSpec+offset ...); within them the indices
+//! kN, kM, kO, kH above apply. Populations interact only through the gas.
+struct ParticleOptions
+{
+    size_t offset = 0; //!< first row of this population in the moment block
+    size_t nMoments = 0; //!< number of moment rows (incl. the enthalpy row H)
+
+    //! [particles.model] 'bimodal': rows kN1, kN2, kM2, kA2 of a single
+    //! material of density phaseDensity[0]; otherwise single mode (kN, kM,
+    //! kO, kH)
+    bool bimodal = false;
+    //! Bimodal: mass [kg] and diameter [m] of a mode-1 particle (nucleus)
+    double monomerMass = 0.0, monomerDiameter = 0.0;
+    //! [particles.fractalDimension] of the aggregates (bimodal mode 2, or
+    //! single mode with primaryDiameter)
+    double fractalDimension = 3.0;
+    //! [particles.sintering] Bimodal: A2 relaxes to the area of the
+    //! volume-equivalent spheres with tau = sinterA T dpp^4 exp(sinterTa/T)
+    bool sintering = false;
+    double sinterA = 0.0, sinterTa = 0.0;
+    //! [particles.primaryDiameter] Single mode: prescribed primary particle
+    //! diameter [m] for the fractal collision diameter used in coagulation
+    //! and diffusion; 0 = compact spheres
+    double primaryDiameter = 0.0;
+    double momentDiffusivity = 0.0; //!< [particles.momentDiffusivity] Diffusivity of moment scalars [m^2/s]
+    double momentBCLeft = 0.0; //!< [particles.momentBCLeft] Fixed left boundary value
+    double momentBCRight = 0.0; //!< [particles.momentBCRight] Fixed right boundary value
+    // Particle nucleation source terms (two-way coupled with the gas phase)
+    //! [particles.phases] Particle material phases as parallel arrays of
+    //! O/metal atomic ratio (ascending, starting at 0 = pure metal) and bulk
+    //! density [kg/m^3]. The particle density is interpolated linearly in the
+    //! O/metal ratio between them (used only to convert particle mass into
+    //! particle size); the last ratio is the maximum oxidation state.
+    std::vector<double> phaseRatio, phaseDensity;
+
+    //! Atomic weights [kg/kmol] of the particle metal ([particles.metal])
+    //! and of oxygen.
+    double metalWeight = 0.0, oxygenWeight = 0.0;
+
+    //! [particles.coagulation] Enable the Brownian coagulation sink for the
+    //! N moment (particle-particle collisions: N decreases, mass unchanged).
+    bool coagulation = false;
+
+    //! [particles.minParticleDiameter] Particle diameter [m] below which
+    //! mass-removing surface reactions also remove particles from N, in
+    //! proportion to the removed mass (particle disintegration).
+    double minParticleDiameter = 0.0;
+
+    //! Collision-based nucleation channels (parallel arrays, one entry per
+    //! channel). Channel c consumes gas species nucSpeciesA[c] (stoichiometry
+    //! nucStoichA[c]) and nucSpeciesB[c] (stoichiometry nucStoichB[c]; may
+    //! equal speciesA for a homomolecular collision) to form
+    //! nucMassPerEvent[c] [kg/kmol of events] of new particle-phase mass,
+    //! of which nucOxygenMassPerEvent[c] is O (oxide nuclei) and the rest metal.
+    //! nucMassPerEvent is ALWAYS derived (in Python) from the consumed
+    //! species' molecular weights so that the particle metal mass production
+    //! equals the gas mass consumption rate identically -- this is what
+    //! makes sum(Y) + mM + mO == 1 an exact invariant of the coupled ODE.
+    //! Only species of the metal and O may nucleate. nucCollisionPrefactor[c] is the
+    //! hard-sphere kinetic collision prefactor (diameter/reduced-mass terms,
+    //! independent of local state) precomputed once in Python from the
+    //! mechanism's transport data; only sqrt(T) and the concentrations need
+    //! to be evaluated at each grid point/timestep.
+    std::vector<int> nucSpeciesA, nucSpeciesB;
+    std::vector<int> nucStoichA, nucStoichB;
+    std::vector<double> nucMassPerEvent, nucOxygenMassPerEvent;
+    std::vector<double> nucCollisionPrefactor;
+    //! Monomer conversion [nucleation.conversionSpecies, conversionRate]:
+    //! each molecule of species convSpecies[c] becomes one particle, at the
+    //! rate convRate * C_k [kmol/m^3/s]; convOxygenMass[c] [kg/kmol] is the
+    //! O part of its mass W_k, the rest is metal.
+    std::vector<int> convSpecies;
+    std::vector<double> convOxygenMass;
+    double convRate = 0.0;
+    //! [nucleation.efficiency] Multiplier of the collision nucleation rate
+    //! (sticking probability of the nucleating collisions).
+    double nucEfficiency = 1.0;
+    //! [nucleation.kelvinLimit] Multiply channel c by max(0, 1 - p_eq/p_1):
+    //! p_1 partial pressure of the metal monomer nucMonomerSpecies, p_eq =
+    //! p_sat exp(4 sigma v_1 / (d_n k_B T)) over a nucleus of
+    //! nucAtomsPerEvent[c] metal atoms (diameter d_n from n v_1).
+    //! nucLnPsatMonomer holds ln(p_sat [Pa]) of the monomer over the
+    //! pure-metal phase on particleThermoT; nucMonomerVolume [m^3] is v_1 in
+    //! that phase; sigma as for evaporation (surfaceTensionA/B).
+    bool nucKelvinLimit = false;
+    int nucMonomerSpecies = -1;
+    std::vector<int> nucAtomsPerEvent;
+    std::vector<double> nucLnPsatMonomer;
+    double nucMonomerVolume = 0.0;
+
+    //! Gas-particle surface reactions (parallel arrays, one entry per
+    //! reaction): gas species surfReactant[r] impinges on a particle and
+    //! leaves as surfProduct[r] (-1 = no gas product), changing the particle
+    //! by surfDeltaM[r] metal atoms and surfDeltaO[r] O atoms per event (both
+    //! derived in Python from the species compositions; positive = added to
+    //! the particle). Rate [kmol/m^3/s] = surfA * exp(-surfTa/T) * theta *
+    //! (particle surface area per m^3) * C_reactant, with surfA in [m/s].
+    std::vector<int> surfReactant, surfProduct;
+    std::vector<double> surfA, surfTa;
+    std::vector<int> surfDeltaM, surfDeltaO;
+
+    //! [particles.surfaceCollisionLimit] Cap surfA * exp(-surfTa/T_p) at the
+    //! hard-sphere collision rate per unit particle area, with the
+    //! reactant's collision diameter surfDiameter[r] [m].
+    bool surfCollisionLimit = false;
+    std::vector<double> surfDiameter;
+
+    //! Heterogeneous condensation (parallel arrays, one entry per condensing
+    //! gas species): species condSpecies[k] (collision diameter
+    //! condDiameter[k] [m], containing condDeltaM[k] metal and condDeltaO[k]
+    //! O atoms) is added to the particles at the kinetic (hard-sphere,
+    //! free-molecular) gas-particle collision rate.
+    std::vector<int> condSpecies;
+    std::vector<double> condDiameter;
+    std::vector<int> condDeltaM, condDeltaO;
+
+    //! [particles.evaporation] Reversible condensation: species c with a
+    //! matching particle phase condPhase[c] (index into phaseRatio, -1 =
+    //! none: condensation only) also evaporates, at the collision rate times
+    //! its saturation concentration over the bulk phase, times the activity
+    //! of the phase (lever-rule weight) and the Kelvin factor
+    //! exp(4 sigma v_m / (d_p k_B T_p)). condLnPsat (row-major, nCond x nT,
+    //! on particleThermoT) holds ln(p_sat [Pa]); condMolarVolume [m^3 per
+    //! molecule] is v_m in the phase; sigma = surfaceTensionA -
+    //! surfaceTensionB * T_p [J/m^2] [particles.surfaceTension].
+    bool evaporation = false;
+    std::vector<int> condPhase;
+    std::vector<double> condLnPsat, condMolarVolume;
+    double surfaceTensionA = 0.0, surfaceTensionB = 0.0;
+
+    //! [particles.coagulationEnhancement] Multiplier of the coagulation
+    //! kernel (e.g. van der Waals enhancement, 2-3 at nm sizes).
+    double coagulationEnhancement = 1.0;
+
+    //! Particle energy (particles.energy, nMoments >= 4). particleThermoT [K] is a temperature
+    //! grid; phaseEnthalpy (row-major, nPhases x nT) holds for each phase the
+    //! enthalpy of its stable condensed species [J per kmol of metal], on the
+    //! same reference as the gas-phase thermo [particles.phases,
+    //! particles.thermoFile].
+    std::vector<double> particleThermoT, phaseEnthalpy;
+    double thermalAccommodation = 0.0; //!< [particles.thermalAccommodation]
+    double radiationAbsorption = 0.0; //!< E(m) [particles.radiationAbsorption]
+    double radiationTsurr = 0.0; //!< [particles.radiationTsurr] [K]
+
+    //! Prescribed surface-reaction heat [J/kmol of events]; negative heats
+    //! the particle [surfaceReaction.deltaH]. Used only if surfPrescribedHeat
+    //! (particles.surfaceReactionHeat = 'prescribed'), otherwise all 0 and
+    //! the heat follows from the thermochemistry.
+    std::vector<double> surfDeltaH;
+    bool surfPrescribedHeat = false;
+
+    //! Classical nucleation theory (CNT), for a single monomer material
+    //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in
+    //! nucPrecursorSpecies, with nucPrecursorAtomCount giving the number of
+    //! monomer units in each cluster (index nucMonomerIndex is the monomer
+    //! itself, atom count == 1). The monomer mass/volume used by the CNT
+    //! rate are derived at runtime from W[nucPrecursorSpecies[nucMonomerIndex]]
+    //! and the pure-metal density phaseDensity[0] -- not a separate user input.
+    std::vector<int> nucPrecursorSpecies;
+    std::vector<int> nucPrecursorAtomCount;
+    int nucMonomerIndex = -1;
+
+    //! Antoine equation coefficients for the precursor's saturation vapor
+    //! pressure: log10(Psat[bar]) = A - B/(C + T[degC]).
+    double nucAntoineA = 0.0, nucAntoineB = 0.0, nucAntoineC = 0.0;
+
+    //! Surface tension as a linear function of temperature [K]:
+    //! sigma = nucSurfaceTensionA + nucSurfaceTensionB * T.
+    double nucSurfaceTensionA = 0.0, nucSurfaceTensionB = 0.0;
+};
 
 //! Configuration options for the simulation.
 /*!
@@ -263,143 +446,13 @@ public:
     double massFluxProportionalGain; //!< [impingingJet.proportionalGain]
     double massFluxIntegralGain; //!< [impingingJet.integralGain] [1/s]
 
-    // NEW! Particles: particle moment (passive scalar) transport [see input.py Particles]
-    int nMoments; //!< [particles.nMoments] Number of particle moment scalars
-    double momentDiffusivity; //!< [particles.momentDiffusivity] Diffusivity of moment scalars [m^2/s]
-    double momentBCLeft; //!< [particles.momentBCLeft] Fixed left boundary value
-    double momentBCRight; //!< [particles.momentBCRight] Fixed right boundary value
-    // Particle nucleation source terms (two-way coupled with the gas phase)
-    //! [particles.phases] Particle material phases as parallel arrays of
-    //! O/metal atomic ratio (ascending, starting at 0 = pure metal) and bulk
-    //! density [kg/m^3]. The particle density is interpolated linearly in the
-    //! O/metal ratio between them (used only to convert particle mass into
-    //! particle size); the last ratio is the maximum oxidation state.
-    std::vector<double> phaseRatio, phaseDensity;
-
-    //! Atomic weights [kg/kmol] of the particle metal ([particles.metal])
-    //! and of oxygen.
-    double metalWeight, oxygenWeight;
-
-    //! [particles.coagulation] Enable the Brownian coagulation sink for the
-    //! N moment (particle-particle collisions: N decreases, mass unchanged).
-    bool coagulation;
-
-    //! [particles.minParticleDiameter] Particle diameter [m] below which
-    //! mass-removing surface reactions also remove particles from N, in
-    //! proportion to the removed mass (particle disintegration).
-    double minParticleDiameter;
-
-    //! Collision-based nucleation channels (parallel arrays, one entry per
-    //! channel). Channel c consumes gas species nucSpeciesA[c] (stoichiometry
-    //! nucStoichA[c]) and nucSpeciesB[c] (stoichiometry nucStoichB[c]; may
-    //! equal speciesA for a homomolecular collision) to form
-    //! nucMassPerEvent[c] [kg/kmol of events] of new particle-phase metal.
-    //! nucMassPerEvent is ALWAYS derived (in Python) from the consumed
-    //! species' molecular weights so that the particle metal mass production
-    //! equals the gas mass consumption rate identically -- this is what
-    //! makes sum(Y) + mM + mO == 1 an exact invariant of the coupled ODE.
-    //! Only pure-metal species may nucleate. nucCollisionPrefactor[c] is the
-    //! hard-sphere kinetic collision prefactor (diameter/reduced-mass terms,
-    //! independent of local state) precomputed once in Python from the
-    //! mechanism's transport data; only sqrt(T) and the concentrations need
-    //! to be evaluated at each grid point/timestep.
-    std::vector<int> nucSpeciesA, nucSpeciesB;
-    std::vector<int> nucStoichA, nucStoichB;
-    std::vector<double> nucMassPerEvent;
-    std::vector<double> nucCollisionPrefactor;
-    //! [nucleation.efficiency] Multiplier of the collision nucleation rate
-    //! (sticking probability of the nucleating collisions).
-    double nucEfficiency;
-    //! [nucleation.kelvinLimit] Multiply channel c by max(0, 1 - p_eq/p_1):
-    //! p_1 partial pressure of the metal monomer nucMonomerSpecies, p_eq =
-    //! p_sat exp(4 sigma v_1 / (d_n k_B T)) over a nucleus of
-    //! nucAtomsPerEvent[c] metal atoms (diameter d_n from n v_1).
-    //! nucLnPsatMonomer holds ln(p_sat [Pa]) of the monomer over the
-    //! pure-metal phase on particleThermoT; nucMonomerVolume [m^3] is v_1 in
-    //! that phase; sigma as for evaporation (surfaceTensionA/B).
-    bool nucKelvinLimit;
-    int nucMonomerSpecies;
-    std::vector<int> nucAtomsPerEvent;
-    std::vector<double> nucLnPsatMonomer;
-    double nucMonomerVolume;
-
-    //! Gas-particle surface reactions (parallel arrays, one entry per
-    //! reaction): gas species surfReactant[r] impinges on a particle and
-    //! leaves as surfProduct[r] (-1 = no gas product), changing the particle
-    //! by surfDeltaM[r] metal atoms and surfDeltaO[r] O atoms per event (both
-    //! derived in Python from the species compositions; positive = added to
-    //! the particle). Rate [kmol/m^3/s] = surfA * exp(-surfTa/T) * theta *
-    //! (particle surface area per m^3) * C_reactant, with surfA in [m/s].
-    std::vector<int> surfReactant, surfProduct;
-    std::vector<double> surfA, surfTa;
-    std::vector<int> surfDeltaM, surfDeltaO;
-
-    //! [particles.surfaceCollisionLimit] Cap surfA * exp(-surfTa/T_p) at the
-    //! hard-sphere collision rate per unit particle area, with the
-    //! reactant's collision diameter surfDiameter[r] [m].
-    bool surfCollisionLimit;
-    std::vector<double> surfDiameter;
-
-    //! Heterogeneous condensation (parallel arrays, one entry per condensing
-    //! gas species): species condSpecies[k] (collision diameter
-    //! condDiameter[k] [m], containing condDeltaM[k] metal and condDeltaO[k]
-    //! O atoms) is added to the particles at the kinetic (hard-sphere,
-    //! free-molecular) gas-particle collision rate.
-    std::vector<int> condSpecies;
-    std::vector<double> condDiameter;
-    std::vector<int> condDeltaM, condDeltaO;
-
-    //! [particles.evaporation] Reversible condensation: species c with a
-    //! matching particle phase condPhase[c] (index into phaseRatio, -1 =
-    //! none: condensation only) also evaporates, at the collision rate times
-    //! its saturation concentration over the bulk phase, times the activity
-    //! of the phase (lever-rule weight) and the Kelvin factor
-    //! exp(4 sigma v_m / (d_p k_B T_p)). condLnPsat (row-major, nCond x nT,
-    //! on particleThermoT) holds ln(p_sat [Pa]); condMolarVolume [m^3 per
-    //! molecule] is v_m in the phase; sigma = surfaceTensionA -
-    //! surfaceTensionB * T_p [J/m^2] [particles.surfaceTension].
-    bool evaporation;
-    std::vector<int> condPhase;
-    std::vector<double> condLnPsat, condMolarVolume;
-    double surfaceTensionA, surfaceTensionB;
-
-    //! [particles.coagulationEnhancement] Multiplier of the coagulation
-    //! kernel (e.g. van der Waals enhancement, 2-3 at nm sizes).
-    double coagulationEnhancement;
-
-    //! Particle energy (particles.energy, nMoments >= 4). particleThermoT [K] is a temperature
-    //! grid; phaseEnthalpy (row-major, nPhases x nT) holds for each phase the
-    //! enthalpy of its stable condensed species [J per kmol of metal], on the
-    //! same reference as the gas-phase thermo [particles.phases,
-    //! particles.thermoFile].
-    std::vector<double> particleThermoT, phaseEnthalpy;
-    double thermalAccommodation; //!< [particles.thermalAccommodation]
-    double radiationAbsorption; //!< E(m) [particles.radiationAbsorption]
-    double radiationTsurr; //!< [particles.radiationTsurr] [K]
-
-    //! Prescribed surface-reaction heat [J/kmol of events]; negative heats
-    //! the particle [surfaceReaction.deltaH]. Used only if surfPrescribedHeat
-    //! (particles.surfaceReactionHeat = 'prescribed'), otherwise all 0 and
-    //! the heat follows from the thermochemistry.
-    std::vector<double> surfDeltaH;
-    bool surfPrescribedHeat;
-
-    //! Classical nucleation theory (CNT), for a single monomer material
-    //! whose cluster species (e.g. Fe, Fe2, Fe3, ...) are all listed in
-    //! nucPrecursorSpecies, with nucPrecursorAtomCount giving the number of
-    //! monomer units in each cluster (index nucMonomerIndex is the monomer
-    //! itself, atom count == 1). The monomer mass/volume used by the CNT
-    //! rate are derived at runtime from W[nucPrecursorSpecies[nucMonomerIndex]]
-    //! and the pure-metal density phaseDensity[0] -- not a separate user input.
-    std::vector<int> nucPrecursorSpecies;
-    std::vector<int> nucPrecursorAtomCount;
-    int nucMonomerIndex;
-
-    //! Antoine equation coefficients for the precursor's saturation vapor
-    //! pressure: log10(Psat[bar]) = A - B/(C + T[degC]).
-    double nucAntoineA, nucAntoineB, nucAntoineC;
-
-    //! Surface tension as a linear function of temperature [K]:
-    //! sigma = nucSurfaceTensionA + nucSurfaceTensionB * T.
-    double nucSurfaceTensionA, nucSurfaceTensionB;
+    //! Particle populations [see input.py Particles], in the order of their
+    //! rows in the moment block
+    std::vector<ParticleOptions> particles;
+    int nMoments; //!< total number of moment rows over all populations
+    //! per moment row: multiplier of integratorSpeciesAbsTol (CVODE)
+    std::vector<double> momentAbsTolScale;
+    //! per moment row: 1 if the QSS integrator keeps the value >= ymin, 0
+    //! for signed rows (particle enthalpy)
+    std::vector<int> momentEnforceMin;
 };

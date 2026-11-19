@@ -10,6 +10,7 @@ class PerfTimer;
 class CanteraGas;
 class ScalarFunction;
 class ConfigOptions;
+struct ParticleOptions;
 
 //! Base class used to integrate the chemical source term at a single point.
 class SourceSystem
@@ -97,6 +98,23 @@ public:
     //! its destruction term.
     void computeCoagulationRates(dvec& momentsD);
 
+    //! Bimodal model (`pop->bimodal`, Jeong & Choi 2003): nucleation into
+    //! mode 1 (fixed nucleus size), Fuchs coagulation within and between the
+    //! modes with the fractal collision diameter of the mode-2 aggregates,
+    //! sintering of their surface and condensation onto them. Fills the
+    //! kN1, kN2, kM2, kA2 terms; mass is conserved exactly.
+    void computeBimodalRates(dvec& momentsQ, dvec& momentsD,
+                             dvec& speciesQ, dvec& speciesD);
+
+    //! Evaluate the particle source terms of all populations
+    //! (`options->particles`): zeroes the four arrays, then for each
+    //! population calls the functions below, which act on population #pop
+    //! only, and puts its terms into its rows of momentsQ/momentsD. The
+    //! species terms of all populations are summed. Shared by
+    //! SourceSystemCVODE::f() and SourceSystemQSS::odefun().
+    void computeParticleSources(dvec& momentsQ, dvec& momentsD,
+                                dvec& speciesQ, dvec& speciesD);
+
     //! Particle energy (nMoments > kH): set #Tp from the enthalpy moment,
     //! or to the gas temperature otherwise. Call before the compute*Rates.
     void updateParticleTemperature();
@@ -153,7 +171,7 @@ public:
     double T; //!< temperature
     dvec Y; //!< species mass fraction
     dvec moments; //!< particle moment scalars (N, mM, mO, H)
-    double Tp; //!< particle temperature [K] (== T without the H moment)
+    double Tp; //!< particle temperature [K] of population #pop (== T without its H moment)
 
     //! Extra constant term introduced by splitting
     dvec splitConst;
@@ -185,6 +203,13 @@ protected:
 
     size_t nSpec; //!< number of species
     size_t nMoments; //!< number of particle moment (N, mM, mO) variables
+
+    //! Population evaluated by the compute*Rates functions (set in
+    //! computeParticleSources()), its moments and number of moment rows;
+    //! the moment arguments of those functions have size #pn.
+    const ParticleOptions* pop;
+    dvec pm;
+    size_t pn;
     int j; //!< grid index for this system
     double x; //!< grid position for this system
     double rhou; //!< density of the unburned gas

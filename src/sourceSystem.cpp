@@ -19,6 +19,8 @@ SourceSystem::SourceSystem()
     , strainFunction(NULL)
     , rateMultiplierFunction(NULL)
     , heatLoss(NULL)
+    , pop(NULL)
+    , pn(0)
     , qLoss(0.0)
     , quasi2d(false)
 {
@@ -70,33 +72,28 @@ void SourceSystem::initialize(size_t new_nSpec, size_t new_nMoments)
 void SourceSystem::computeNucleationRates
 (dvec& momentsQ, dvec& momentsD, dvec& speciesQ, dvec& speciesD)
 {
-    momentsQ.setZero(nMoments);
-    momentsD.setZero(nMoments);
-    speciesQ.setZero(nSpec);
-    speciesD.setZero(nSpec);
-
-    if (nMoments == 0) {
-        return;
-    }
+    // With the bimodal model the moments here are the single-mode layout
+    // (N, mM, mO) of the nuclei (see computeBimodalRates), without H
+    const bool energy = pn > kH && !pop->bimodal;
 
     // --- Collision-based nucleation channels ----------------------------
     // The hard-sphere kinetic collision prefactor (diameter/reduced-mass
     // terms) is precomputed once in Python; only sqrt(T) and the
     // concentrations need to be evaluated here.
     double pMonomer = 0.0; // partial pressure of the metal monomer [Pa]
-    if (options->nucKelvinLimit) {
-        size_t k1 = options->nucMonomerSpecies;
+    if (pop->nucKelvinLimit) {
+        size_t k1 = pop->nucMonomerSpecies;
         pMonomer = Y[k1] * rho / W[k1] * Cantera::GasConstant * T;
     }
-    for (size_t c = 0; c < options->nucSpeciesA.size(); c++) {
-        size_t kA = options->nucSpeciesA[c];
-        size_t kB = options->nucSpeciesB[c];
+    for (size_t c = 0; c < pop->nucSpeciesA.size(); c++) {
+        size_t kA = pop->nucSpeciesA[c];
+        size_t kB = pop->nucSpeciesB[c];
         double concA = Y[kA] * rho / W[kA]; // [kmol/m^3]
         double concB = Y[kB] * rho / W[kB]; // [kmol/m^3]
 
         // Calculate the nucleation rate (prefactor has a unit of m^3/s/sqrt(K)/kmol (already * avogadro))
         // Unit of J: kmol/m^3/s
-        double J = options->nucEfficiency * options->nucCollisionPrefactor[c] *
+        double J = pop->nucEfficiency * pop->nucCollisionPrefactor[c] *
                    sqrt(T) * concA * concB;
         // Halve the nucleation for like molecules
         if (kA == kB) {
@@ -105,24 +102,45 @@ void SourceSystem::computeNucleationRates
         }
         // Only nuclei above the critical size grow: net monomer uptake of the
         // nucleus ~ (p_1 - p_eq), so no nucleation for p_1 <= p_eq
-        if (options->nucKelvinLimit) {
-            double pEq = nucleusEquilibriumPressure(options->nucAtomsPerEvent[c], T, *options);
+        if (pop->nucKelvinLimit) {
+            double pEq = nucleusEquilibriumPressure(pop->nucAtomsPerEvent[c], T, *pop);
             J *= (pMonomer > pEq) ? 1.0 - pEq / pMonomer : 0.0;
         }
         J = std::max(J, 0.0);
 
         // Particle moments: pure production
         momentsQ[kN] += J / rho;
-        momentsQ[kM] += J / rho * options->nucMassPerEvent[c];
+        double massO = pop->nucOxygenMassPerEvent[c];
+        momentsQ[kM] += J / rho * (pop->nucMassPerEvent[c] - massO);
+        if (massO != 0) {
+            momentsQ[kO] += J / rho * massO;
+        }
 
         // Gas species consumption: pure destruction
-        speciesD[kA] += options->nucStoichA[c] * J * W[kA] / rho;
-        speciesD[kB] += options->nucStoichB[c] * J * W[kB] / rho;
+        speciesD[kA] += pop->nucStoichA[c] * J * W[kA] / rho;
+        speciesD[kB] += pop->nucStoichB[c] * J * W[kB] / rho;
 
         // The new particle takes the enthalpy of the consumed molecules
-        if (nMoments > kH) {
-            momentsQ[kH] += J * (options->nucStoichA[c] * hk[kA] +
-                                 options->nucStoichB[c] * hk[kB]) / rho;
+        if (energy) {
+            momentsQ[kH] += J * (pop->nucStoichA[c] * hk[kA] +
+                                 pop->nucStoichB[c] * hk[kB]) / rho;
+        }
+    }
+
+    // --- Monomer conversion ------------------------------------------------
+    // Every molecule of the species becomes one particle (first order)
+    for (size_t c = 0; c < pop->convSpecies.size(); c++) {
+        size_t k = pop->convSpecies[c];
+        double J = std::max(pop->convRate * Y[k] * rho / W[k], 0.0); // [kmol/m^3/s]
+        double massO = pop->convOxygenMass[c];
+        momentsQ[kN] += J / rho;
+        momentsQ[kM] += J / rho * (W[k] - massO);
+        if (massO != 0) {
+            momentsQ[kO] += J / rho * massO;
+        }
+        speciesD[k] += J * W[k] / rho;
+        if (energy) {
+            momentsQ[kH] += J * hk[k] / rho;
         }
     }
 
@@ -131,8 +149,8 @@ void SourceSystem::computeNucleationRates
     // still sums all cluster sizes toward the monomer-equivalent
     // supersaturation, but the rate and mass balance are referenced to the
     // single true monomer species (nucMonomerIndex, atom count == 1).
-    size_t nPrecursors = options->nucPrecursorSpecies.size();
-    if (nPrecursors == 0 || options->nucMonomerIndex < 0) {
+    size_t nPrecursors = pop->nucPrecursorSpecies.size();
+    if (nPrecursors == 0 || pop->nucMonomerIndex < 0) {
         return;
     }
 
@@ -142,16 +160,16 @@ void SourceSystem::computeNucleationRates
 
     // Saturation vapor pressure (Antoine equation, T in degC, P in bar).
     double Tc = T - 273.15;
-    double pSat = pow(10.0, options->nucAntoineA -
-                      options->nucAntoineB / (Tc + options->nucAntoineC)) * 1e5; // [Pa]
+    double pSat = pow(10.0, pop->nucAntoineA -
+                      pop->nucAntoineB / (Tc + pop->nucAntoineC)) * 1e5; // [Pa]
 
     // Monomer-equivalent partial pressure: sum of precursor concentrations
     // weighted by their cluster size (atom count).
     double pMon = 0.0;
     for (size_t i = 0; i < nPrecursors; i++) {
-        size_t k = options->nucPrecursorSpecies[i];
+        size_t k = pop->nucPrecursorSpecies[i];
         double conc = Y[k] * rho / W[k]; // [kmol/m^3]
-        pMon += conc * 1000.0 * options->nucPrecursorAtomCount[i] * Ru_ * T;
+        pMon += conc * 1000.0 * pop->nucPrecursorAtomCount[i] * Ru_ * T;
     }
     pMon = std::max(pMon, 0.0);
     double S = pMon / (pSat + 1e-300); // supersaturation ratio
@@ -161,14 +179,14 @@ void SourceSystem::computeNucleationRates
 
     // Monomer mass/volume, derived from the mechanism (not user-specified),
     // using the pure-metal phase density.
-    size_t kMon = options->nucPrecursorSpecies[options->nucMonomerIndex];
+    size_t kMon = pop->nucPrecursorSpecies[pop->nucMonomerIndex];
     double n_mon = pMon / (kB_ * T); // monomer-equivalent number density [1/m^3]
     double m1 = W[kMon] / NA_; // monomer mass [kg] -- unrelated to M_PI
-    double v1 = W[kMon] / (NA_ * options->phaseDensity[0]); // monomer volume [m^3]
+    double v1 = W[kMon] / (NA_ * pop->phaseDensity[0]); // monomer volume [m^3]
 
     // Surface tension and dimensionless surface energy parameter Theta,
     // referenced to a spherical monomer of volume v1.
-    double sigma = options->nucSurfaceTensionA + options->nucSurfaceTensionB * T;
+    double sigma = pop->nucSurfaceTensionA + pop->nucSurfaceTensionB * T;
     double d1 = pow(6.0 * v1 / M_PI, 1.0 / 3.0);
     double theta = M_PI * d1 * d1 * sigma / (kB_ * T);
 
@@ -184,34 +202,35 @@ void SourceSystem::computeNucleationRates
     momentsQ[kN] += J / rho;
     momentsQ[kM] += J * gStar * W[kMon] / rho;
     speciesD[kMon] += J * gStar * W[kMon] / rho;
-    if (nMoments > kH) {
+    if (energy) {
         momentsQ[kH] += J * gStar * hk[kMon] / rho;
     }
 }
 
 void SourceSystem::computeCoagulationRates(dvec& momentsD)
 {
-    if (nMoments < 2 || !options->coagulation) {
+    if (pn < 2 || !pop->coagulation) {
         // Both N (kN) and mM (kM) are required to define a particle size.
         return;
     }
 
-    double N = moments[kN]; // [kmol particles / kg gas]
-    double mM = moments[kM]; // [kg particle-phase metal / kg gas]
-    double mO = (nMoments > kO) ? moments[kO] : 0.0; // [kg particle-phase O / kg gas]
+    double N = pm[kN]; // [kmol particles / kg gas]
+    double mM = pm[kM]; // [kg particle-phase metal / kg gas]
+    double mO = (pn > kO) ? pm[kO] : 0.0; // [kg particle-phase O / kg gas]
 
-    double vParticle = particleVolumeFromMoments(N, mM, mO, *options);
+    double vParticle = particleVolumeFromMoments(N, mM, mO, *pop);
     if (!(vParticle > 0)) {
         return; // no particles present -- nothing to coagulate
     }
     double dc = particleDiameterFromVolume(vParticle); // [m]
     double mp = (mM + std::max(mO, 0.0)) / (N * Cantera::Avogadro); // single-particle mass [kg]
+    dc = fractalCollisionDiameter(dc, *pop);
 
     double Wmx_ = gas->getMixtureMolecularWeight(); // [kg/kmol]
     double mu_ = gas->getViscosity(); // [Pa*s]
     double meanFreePath = gasMeanFreePath(mu_, T, Wmx_, gas->pressure);
 
-    double beta = options->coagulationEnhancement *
+    double beta = pop->coagulationEnhancement *
                   monodisperseCoagulationKernel(dc, mp, T, mu_, meanFreePath);
 
     // Monodisperse Brownian coagulation halves the physical number density
@@ -235,49 +254,49 @@ void SourceSystem::computeCoagulationRates(dvec& momentsD)
 void SourceSystem::computeSurfaceReactionRates
 (dvec& momentsQ, dvec& momentsD, dvec& speciesQ, dvec& speciesD)
 {
-    size_t nReactions = options->surfReactant.size();
-    if (nReactions == 0 || nMoments < 2) {
+    size_t nReactions = pop->surfReactant.size();
+    if (nReactions == 0 || pn < 2) {
         return;
     }
 
-    double N = moments[kN]; // [kmol particles / kg gas]
-    double mM = moments[kM]; // [kg particle-phase metal / kg gas]
-    double mO = (nMoments > kO) ? moments[kO] : 0.0; // [kg particle-phase O / kg gas]
+    double N = pm[kN]; // [kmol particles / kg gas]
+    double mM = pm[kM]; // [kg particle-phase metal / kg gas]
+    double mO = (pn > kO) ? pm[kO] : 0.0; // [kg particle-phase O / kg gas]
 
-    double vParticle = particleVolumeFromMoments(N, mM, mO, *options);
+    double vParticle = particleVolumeFromMoments(N, mM, mO, *pop);
     if (!(vParticle > 0)) {
         return; // no particles present -- no surface to react on
     }
     double dp = particleDiameterFromVolume(vParticle); // [m]
     double mp = (mM + std::max(mO, 0.0)) / (N * Cantera::Avogadro); // single-particle mass [kg]
     double nParticles = N * rho * Cantera::Avogadro; // [particles / m^3]
-    floorParticleSize(dp, nParticles, &mp, *options);
+    floorParticleSize(dp, nParticles, &mp, *pop);
     double area = M_PI * dp * dp * nParticles; // particle surface area [m^2 / m^3]
 
     // The surface composition is assumed equal to the particle composition:
     // atomic fractions of metal and O sites, plus a gradual cap on oxidation
     // that vanishes at the most oxidized phase (O/metal = xMax).
-    double xO = particleOxygenRatio(mM, mO, *options);
+    double xO = particleOxygenRatio(mM, mO, *pop);
     double XM = 1.0 / (1.0 + xO);
     double XO = 1.0 - XM;
-    double xMax = options->phaseRatio.back();
+    double xMax = pop->phaseRatio.back();
     double capFactor = (xMax > 0) ? std::max(1.0 - xO / xMax, 0.0) : 0.0;
 
-    const double WM = options->metalWeight;
-    const double WO = options->oxygenWeight;
+    const double WM = pop->metalWeight;
+    const double WO = pop->oxygenWeight;
 
     // Prescribed heat: the atoms gained or lost carry the particle's own
     // enthalpy at Tp, from H = nM * h(x, Tp) with x = nO/nM:
     //     dH = (h - x*dh/dx) * dnM + dh/dx * dnO
     double hP = 0.0, dhdx = 0.0;
-    if (nMoments > kH && options->surfPrescribedHeat) {
-        hP = particleEnthalpyPerMetal(Tp, xO, *options, &dhdx);
+    if (pn > kH && pop->surfPrescribedHeat) {
+        hP = particleEnthalpyPerMetal(Tp, xO, *pop, &dhdx);
     }
 
     double massLoss = 0.0; // particle mass removal rate [kg / kg gas / s]
     for (size_t r = 0; r < nReactions; r++) {
-        int dM = options->surfDeltaM[r];
-        int dO = options->surfDeltaO[r];
+        int dM = pop->surfDeltaM[r];
+        int dO = pop->surfDeltaO[r];
 
         // Fraction of the surface available to this reaction
         double theta;
@@ -300,17 +319,17 @@ void SourceSystem::computeSurfaceReactionRates
             theta *= capFactor;
         }
 
-        size_t k = options->surfReactant[r];
+        size_t k = pop->surfReactant[r];
         double conc = Y[k] * rho / W[k]; // [kmol/m^3]
         // Arrhenius factor at the particle (surface) temperature
-        double kSurf = options->surfA[r] * exp(-options->surfTa[r] / Tp); // [m/s]
-        if (options->surfCollisionLimit) {
+        double kSurf = pop->surfA[r] * exp(-pop->surfTa[r] / Tp); // [m/s]
+        if (pop->surfCollisionLimit) {
             // At most one reaction per collision on an available site:
             // hard-sphere collision rate per unit particle area (as for
             // condensation), at the gas temperature
             double mk = W[k] / Cantera::Avogadro; // molecular mass [kg]
             double mu = mk * mp / (mk + mp); // reduced mass [kg]
-            double ratio = 1.0 + options->surfDiameter[r] / dp;
+            double ratio = 1.0 + pop->surfDiameter[r] / dp;
             double kColl = 0.25 * ratio * ratio *
                            sqrt(8.0 * Cantera::Boltzmann * T / (M_PI * mu)); // [m/s]
             kSurf = std::min(kSurf, kColl);
@@ -340,24 +359,24 @@ void SourceSystem::computeSurfaceReactionRates
         // Gas species: reactant consumed, product released. By construction
         // W[reactant] - W[product] == dM*WM + dO*WO, so mass is conserved.
         speciesD[k] += W[k] * R / rho;
-        int p = options->surfProduct[r];
+        int p = pop->surfProduct[r];
         if (p >= 0) {
             speciesQ[p] += W[p] * R / rho;
         }
 
-        if (nMoments > kH) {
+        if (pn > kH) {
             // The reacting molecule sticks, so it brings its whole sensible
             // heat h(T) - h(Tp); conduction (computeParticleHeatTransfer)
             // already transfers the fraction alpha of it for every collision,
             // so only the remaining (1 - alpha) is added here
             double hReactantTp = gas->getSpeciesEnthalpy(k, Tp);
-            double sensible = (1.0 - options->thermalAccommodation) *
+            double sensible = (1.0 - pop->thermalAccommodation) *
                               (hk[k] - hReactantTp); // [J/kmol]
-            if (options->surfPrescribedHeat) {
+            if (pop->surfPrescribedHeat) {
                 // Prescribed heat -surfDeltaH only (as OpenFOAM): the atoms
                 // gained or lost carry their enthalpy in the particle at Tp
                 double dHcomposition = (hP - xO * dhdx) * dM + dhdx * dO; // [J/kmol]
-                momentsQ[kH] += R * (dHcomposition - options->surfDeltaH[r] + sensible) / rho;
+                momentsQ[kH] += R * (dHcomposition - pop->surfDeltaH[r] + sensible) / rho;
             } else {
                 // Reaction heat from the thermochemistry at Tp: the particle
                 // receives the absolute enthalpy of the reactant and loses that
@@ -387,13 +406,13 @@ double SourceSystem::addDisintegration(double massLoss, double dp, dvec& moments
     // mass (and size) stays fixed instead of shrinking further. The switch is
     // ramped linearly over [dmin, 1.1*dmin]: with a hard switch at dmin the
     // integrator chatters wherever growth and etching balance near dmin.
-    double dmin = options->minParticleDiameter;
+    double dmin = pop->minParticleDiameter;
     if (!(massLoss > 0) || dp >= 1.1 * dmin) {
         return 0.0;
     }
-    double N = moments[kN];
-    double mM = moments[kM];
-    double mO = (nMoments > kO) ? moments[kO] : 0.0;
+    double N = pm[kN];
+    double mM = pm[kM];
+    double mO = (pn > kO) ? pm[kO] : 0.0;
     double ramp = std::min((1.1 * dmin - dp) / (0.1 * dmin), 1.0);
     double dNdt_dis = ramp * N * massLoss / (mM + std::max(mO, 0.0));
     momentsD[kN] += dNdt_dis;
@@ -403,16 +422,16 @@ double SourceSystem::addDisintegration(double massLoss, double dp, dvec& moments
 void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
                                             dvec& speciesQ, dvec& speciesD)
 {
-    size_t nCond = options->condSpecies.size();
-    if (nCond == 0 || nMoments < 2) {
+    size_t nCond = pop->condSpecies.size();
+    if (nCond == 0 || pn < 2) {
         return;
     }
 
-    double N = moments[kN]; // [kmol particles / kg gas]
-    double mM = moments[kM]; // [kg particle-phase metal / kg gas]
-    double mO = (nMoments > kO) ? moments[kO] : 0.0; // [kg particle-phase O / kg gas]
+    double N = pm[kN]; // [kmol particles / kg gas]
+    double mM = pm[kM]; // [kg particle-phase metal / kg gas]
+    double mO = (pn > kO) ? pm[kO] : 0.0; // [kg particle-phase O / kg gas]
 
-    double vParticle = particleVolumeFromMoments(N, mM, mO, *options);
+    double vParticle = particleVolumeFromMoments(N, mM, mO, *pop);
     if (!(vParticle > 0)) {
         return; // no particles present -- nothing to condense on
     }
@@ -420,24 +439,24 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
     double dp = particleDiameterFromVolume(vParticle); // [m]
     double mp = (mM + std::max(mO, 0.0)) / (N * NA_); // single-particle mass [kg]
     double nParticles = N * rho * NA_; // [particles / m^3]
-    floorParticleSize(dp, nParticles, &mp, *options);
+    floorParticleSize(dp, nParticles, &mp, *pop);
 
     // Same gradual cap as for surface reactions: species richer in O than the
     // most oxidized phase stop condensing as the particle approaches it.
-    double xO = particleOxygenRatio(mM, mO, *options);
-    double xMax = options->phaseRatio.back();
+    double xO = particleOxygenRatio(mM, mO, *pop);
+    double xMax = pop->phaseRatio.back();
     double capFactor = (xMax > 0) ? std::max(1.0 - xO / xMax, 0.0) : 0.0;
 
     double massLoss = 0.0; // particle mass evaporation rate [kg / kg gas / s]
     for (size_t c = 0; c < nCond; c++) {
-        size_t k = options->condSpecies[c];
-        int dM = options->condDeltaM[c];
-        int dO = options->condDeltaO[c];
+        size_t k = pop->condSpecies[c];
+        int dM = pop->condDeltaM[c];
+        int dO = pop->condDeltaO[c];
 
         // Hard-sphere collision rate between molecules of k and particles
         double mk = W[k] / NA_; // molecular mass [kg]
         double mu = mk * mp / (mk + mp); // reduced mass [kg]
-        double dkp = dp + options->condDiameter[c];
+        double dkp = dp + pop->condDiameter[c];
         double beta = 0.25 * M_PI * dkp * dkp *
                       sqrt(8.0 * Cantera::Boltzmann * T / (M_PI * mu)); // [m^3/s]
 
@@ -448,17 +467,17 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
         }
 
         // By construction W[k] == dM*WM + dO*WO, so mass is conserved.
-        momentsQ[kM] += dM * options->metalWeight * R / rho;
+        momentsQ[kM] += dM * pop->metalWeight * R / rho;
         if (dO != 0) {
-            momentsQ[kO] += dO * options->oxygenWeight * R / rho;
+            momentsQ[kO] += dO * pop->oxygenWeight * R / rho;
         }
         speciesD[k] += W[k] * R / rho;
-        if (nMoments > kH) {
+        if (pn > kH) {
             // Enthalpy of the condensed molecules at Tp, plus the part
             // (1 - alpha) of their sensible heat not already transferred by
             // conduction (as for the surface reactions)
             double hkTp = gas->getSpeciesEnthalpy(k, Tp);
-            momentsQ[kH] += R * (hkTp + (1.0 - options->thermalAccommodation) *
+            momentsQ[kH] += R * (hkTp + (1.0 - pop->thermalAccommodation) *
                                  (hk[k] - hkTp)) / rho;
         }
 
@@ -466,33 +485,33 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
         // collision rate at the saturation concentration over the bulk phase
         // at Tp, times the activity of that phase at the surface and the
         // Kelvin factor of the curved surface.
-        int phase = options->evaporation ? options->condPhase[c] : -1;
+        int phase = pop->evaporation ? pop->condPhase[c] : -1;
         if (phase < 0) {
             continue;
         }
-        double activity = phaseActivity(xO, phase, *options);
+        double activity = phaseActivity(xO, phase, *pop);
         if (!(activity > 0)) {
             continue;
         }
-        double sigma = options->surfaceTensionA - options->surfaceTensionB * Tp;
+        double sigma = pop->surfaceTensionA - pop->surfaceTensionB * Tp;
         // Kelvin factor of the curved surface; dp is at least
         // minParticleDiameter (floorParticleSize), otherwise it would grow
         // faster than d_p^2 shrinks and the rate would diverge as d_p -> 0.
-        double kelvin = 4.0 * sigma * options->condMolarVolume[c] /
+        double kelvin = 4.0 * sigma * pop->condMolarVolume[c] /
                         (dp * Cantera::Boltzmann * Tp);
-        double cSat = condensationSaturationPressure(c, Tp, *options) /
+        double cSat = condensationSaturationPressure(c, Tp, *pop) /
                       (Cantera::GasConstant * Tp); // [kmol/m^3]
         double Rev = beta * nParticles * activity * cSat * exp(kelvin); // [kmol/m^3/s]
 
-        double dmM = dM * options->metalWeight * Rev / rho;
-        double dmO = dO * options->oxygenWeight * Rev / rho;
+        double dmM = dM * pop->metalWeight * Rev / rho;
+        double dmO = dO * pop->oxygenWeight * Rev / rho;
         momentsD[kM] += dmM;
         if (dO != 0) {
             momentsD[kO] += dmO;
         }
         massLoss += dmM + dmO;
         speciesQ[k] += W[k] * Rev / rho;
-        if (nMoments > kH) {
+        if (pn > kH) {
             // The evaporated molecules leave with their enthalpy at Tp
             momentsQ[kH] -= Rev * gas->getSpeciesEnthalpy(k, Tp) / rho;
         }
@@ -503,8 +522,8 @@ void SourceSystem::computeCondensationRates(dvec& momentsQ, dvec& momentsD,
 
 void SourceSystem::updateParticleTemperature()
 {
-    if (nMoments > kH) {
-        Tp = particleTemperature(moments[kH], moments[kM], moments[kO], T, *options);
+    if (pn > kH && !pop->bimodal) {
+        Tp = particleTemperature(pm[kH], pm[kM], pm[kO], T, *pop);
     } else {
         Tp = T;
     }
@@ -512,11 +531,11 @@ void SourceSystem::updateParticleTemperature()
 
 void SourceSystem::computeParticleHeatTransfer(dvec& momentsQ)
 {
-    if (nMoments <= kH) {
+    if (pn <= kH) {
         return;
     }
-    double N = moments[kN];
-    double vParticle = particleVolumeFromMoments(N, moments[kM], moments[kO], *options);
+    double N = pm[kN];
+    double vParticle = particleVolumeFromMoments(N, pm[kM], pm[kO], *pop);
     if (!(vParticle > 0) || Tp == T) {
         return;
     }
@@ -525,14 +544,14 @@ void SourceSystem::computeParticleHeatTransfer(dvec& momentsQ)
     double dp = particleDiameterFromVolume(vParticle); // [m]
     // Same mass in d_min particles below d_min, as for the surface sources
     double nPerKg = N * NA_; // [particles / kg gas]
-    floorParticleSize(dp, nPerKg, nullptr, *options);
+    floorParticleSize(dp, nPerKg, nullptr, *pop);
 
     // Conduction: free-molecular limit (Filippov & Rosner 2000) with thermal
     // accommodation alpha, combined harmonically with the continuum limit
     double Wmx_ = gas->getMixtureMolecularWeight(); // [kg/kmol]
     double cBar = sqrt(8.0 * kB_ * T / (M_PI * Wmx_ / NA_)); // mean molecular speed [m/s]
     double gamma = cp / gas->thermo->cv_mass();
-    double qFM = options->thermalAccommodation * M_PI * dp * dp *
+    double qFM = pop->thermalAccommodation * M_PI * dp * dp *
                  gas->pressure / 8.0 * cBar * (gamma + 1) / (gamma - 1) *
                  (Tp / T - 1.0); // [W]
     double qC = 2.0 * M_PI * dp * gas->getThermalConductivity() * (Tp - T); // [W]
@@ -541,11 +560,139 @@ void SourceSystem::computeParticleHeatTransfer(dvec& momentsQ)
     // Radiation, Rayleigh limit (d << wavelength): emission ~ d^3 T^5 with
     // the absorption function E(m), net exchange with surroundings at Tsurr
     const double c5 = 8.0 * 24.0 * 1.0369277551433699; // 4*2*Gamma(5)*zeta(5)
-    double P = c5 * pow(M_PI, 3) * pow(dp, 3) * options->radiationAbsorption *
+    double P = c5 * pow(M_PI, 3) * pow(dp, 3) * pop->radiationAbsorption *
                pow(kB_, 5) / (pow(Cantera::Planck, 4) * pow(Cantera::lightSpeed, 3)) *
-               (pow(Tp, 5) - pow(options->radiationTsurr, 5)); // [W]
+               (pow(Tp, 5) - pow(pop->radiationTsurr, 5)); // [W]
 
     momentsQ[kH] -= nPerKg * (q + P);
+}
+
+void SourceSystem::computeBimodalRates(dvec& momentsQ, dvec& momentsD,
+                                       dvec& speciesQ, dvec& speciesD)
+{
+    const double NA_ = Cantera::Avogadro;
+    const double rhoP = pop->phaseDensity[0]; // particle material density
+    const double m1 = pop->monomerMass; // mode-1 particle mass [kg]
+    const double d1 = pop->monomerDiameter; // mode-1 particle diameter [m]
+
+    // Nucleation into mode 1, evaluated in the single-mode layout (N, mM,
+    // mO); the nucleated mass gives the number of nuclei of mass m1, so that
+    // the gas mass consumed equals the mode-1 mass formed
+    dvec q = dvec::Zero(3), d = dvec::Zero(3);
+    computeNucleationRates(q, d, speciesQ, speciesD);
+    momentsQ[kN1] += (q[kM] + q[kO]) / (m1 * NA_);
+
+    // Mode-2 aggregates: mass and area per particle -> primary particle
+    // diameter, number of primaries and collision diameter
+    double N1 = std::max(pm[kN1], 0.0); // [kmol / kg gas]
+    double N2 = pm[kN2];
+    double n1 = N1 * rho * NA_; // [1/m^3]
+    double mp2, v2, dpp, np, dc2;
+    bool haveMode2 = bimodalAggregate(N2, pm[kM2], pm[kA2], rho, *pop,
+                                      mp2, v2, dpp, np, dc2);
+    double n2 = haveMode2 ? N2 * rho * NA_ : 0.0;
+
+    double mu_ = gas->getViscosity(); // [Pa*s]
+    double meanFreePath = gasMeanFreePath(mu_, T, gas->getMixtureMolecularWeight(),
+                                          gas->pressure);
+
+    // Brownian coagulation within and between the modes (Fuchs kernel with
+    // the collision diameters)
+    if (pop->coagulation && (n1 > 0 || n2 > 0)) {
+        double D1 = particleDiffusivityFromDiameter(d1, T, mu_, meanFreePath);
+        double f = pop->coagulationEnhancement;
+        double b11 = f * fuchsCoagulationKernel(d1, m1, D1, d1, m1, D1, T);
+        double b12 = 0.0, b22 = 0.0, r = 2.0;
+        if (haveMode2) {
+            double D2 = particleDiffusivityFromDiameter(dc2, T, mu_, meanFreePath);
+            b12 = f * fuchsCoagulationKernel(d1, m1, D1, dc2, mp2, D2, T);
+            b22 = f * fuchsCoagulationKernel(dc2, mp2, D2, dc2, mp2, D2, T);
+            r = mp2 / m1;
+        }
+        BimodalCoagulationRates c = bimodalCoagulation(n1, n2, r, b11, b12, b22);
+        double toMoments = 1.0 / (rho * NA_); // [1/m^3/s] -> [kmol/kg/s]
+        momentsD[kN1] += c.n1Loss * toMoments;
+        momentsQ[kN2] += c.n2Gain * toMoments;
+        momentsD[kN2] += c.n2Loss * toMoments;
+        // the monomers keep their mass and (unsintered) surface
+        momentsQ[kM2] += c.monomersToMode2 * m1 / rho;
+        momentsQ[kA2] += c.monomersToMode2 * M_PI * d1 * d1 / rho;
+    }
+
+    if (!haveMode2) {
+        return;
+    }
+
+    // Sintering: the aggregate surface relaxes to that of the
+    // volume-equivalent spheres. The relaxation acts from both sides: A2 <
+    // As is unphysical, but the operator splitting can carry A2 below As
+    // where tau is very short, and a one-sided sink would then leave it
+    // there (and let it run away through the split constants).
+    if (pop->sintering) {
+        double aSphere = std::pow(M_PI, 1.0 / 3.0) * std::pow(6.0 * v2, 2.0 / 3.0);
+        double As = N2 * NA_ * aSphere; // [m^2 / kg gas]
+        double tau = sinteringTime(T, dpp, pop->sinterA, pop->sinterTa);
+        double rate = (pm[kA2] - As) / tau; // [m^2 / kg gas / s]
+        if (rate > 0) {
+            momentsD[kA2] += rate;
+        } else {
+            momentsQ[kA2] -= rate;
+        }
+    }
+
+    // Condensation onto the aggregates (hard-sphere collision rate with the
+    // collision diameter); the surface grows as for spheres of the primary
+    // diameter, dA = 4 dV / dpp
+    for (size_t c = 0; c < pop->condSpecies.size(); c++) {
+        size_t k = pop->condSpecies[c];
+        double mk = W[k] / NA_; // molecular mass [kg]
+        double mu = mk * mp2 / (mk + mp2); // reduced mass [kg]
+        double dkp = dc2 + pop->condDiameter[c];
+        double beta = 0.25 * M_PI * dkp * dkp *
+                      sqrt(8.0 * Cantera::Boltzmann * T / (M_PI * mu)); // [m^3/s]
+        double conc = Y[k] * rho / W[k]; // [kmol/m^3]
+        double R = std::max(beta * n2 * conc, 0.0); // [kmol/m^3/s]
+        double dM = W[k] * R / rho; // [kg / kg gas / s]
+        momentsQ[kM2] += dM;
+        momentsQ[kA2] += 4.0 / dpp * dM / rhoP;
+        speciesD[k] += dM;
+    }
+}
+
+void SourceSystem::computeParticleSources
+(dvec& momentsQ, dvec& momentsD, dvec& speciesQ, dvec& speciesD)
+{
+    momentsQ.setZero(nMoments);
+    momentsD.setZero(nMoments);
+    speciesQ.setZero(nSpec);
+    speciesD.setZero(nSpec);
+
+    dvec Q, D;
+    for (const ParticleOptions& p : options->particles) {
+        if (p.nMoments == 0) {
+            continue;
+        }
+        // The compute*Rates functions act on this population only
+        pop = &p;
+        pn = p.nMoments;
+        pm = moments.segment(p.offset, pn);
+        Q.setZero(pn);
+        D.setZero(pn);
+
+        updateParticleTemperature();
+        if (p.bimodal) {
+            computeBimodalRates(Q, D, speciesQ, speciesD);
+        } else {
+            computeNucleationRates(Q, D, speciesQ, speciesD);
+            computeSurfaceReactionRates(Q, D, speciesQ, speciesD);
+            computeCondensationRates(Q, D, speciesQ, speciesD);
+            computeCoagulationRates(D);
+            computeParticleHeatTransfer(Q);
+        }
+
+        momentsQ.segment(p.offset, pn) = Q;
+        momentsD.segment(p.offset, pn) = D;
+    }
 }
 
 void SourceSystem::setTimers
@@ -610,7 +757,7 @@ void SourceSystemCVODE::setOptions(ConfigOptions& opts)
     }
     for (size_t m=0; m<nMoments; m++) {
         integrator->abstol[kSpecies+nSpec+m] = options->integratorSpeciesAbsTol *
-            ((m == kH) ? particleEnthalpyTolScale : 1.0);
+            options->momentAbsTolScale[m];
     }
     integrator->reltol = options->integratorRelTol;
     integrator->minStep = options->integratorMinTimestep;
@@ -656,12 +803,7 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
 
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
-    updateParticleTemperature();
-    computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeCondensationRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeCoagulationRates(momentsD);
-    computeParticleHeatTransfer(momentsQ);
+    computeParticleSources(momentsQ, momentsD, speciesQ, speciesD);
     dMomentsdt = momentsQ - momentsD + splitConst.segment(kSpecies+nSpec, nMoments);
     dYdt += speciesQ - speciesD;
 
@@ -931,11 +1073,6 @@ void SourceSystemQSS::initialize(size_t new_nSpec, size_t new_nMoments)
     dMomentsdtD.setConstant(nMoments, 0);
 
     integrator.enforce_ymin[kMomentum] = false;
-    if (nMoments > kH) {
-        // The particle enthalpy is signed (oxide formation enthalpies); its
-        // whole net source is put in the "production" term
-        integrator.enforce_ymin[kSpecies+nSpec+kH] = false;
-    }
 }
 
 void SourceSystemQSS::setOptions(ConfigOptions& opts)
@@ -950,6 +1087,11 @@ void SourceSystemQSS::setOptions(ConfigOptions& opts)
     integrator.stabilityCheck = options->qss_stabilityCheck;
     integrator.ymin.setConstant(nSpec + 2 + nMoments, options->qss_minval);
     integrator.ymin[kMomentum] = -1e4;
+    for (size_t m=0; m<nMoments; m++) {
+        // The particle enthalpy is signed (oxide formation enthalpies); its
+        // whole net source is put in the "production" term
+        integrator.enforce_ymin[kSpecies+nSpec+m] = options->momentEnforceMin[m];
+    }
 }
 
 void SourceSystemQSS::setState
@@ -1014,12 +1156,7 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
 
     // Particle nucleation source terms (two-way coupled with the gas phase)
     dvec momentsQ, momentsD, speciesQ, speciesD;
-    updateParticleTemperature();
-    computeNucleationRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeSurfaceReactionRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeCondensationRates(momentsQ, momentsD, speciesQ, speciesD);
-    computeCoagulationRates(momentsD);
-    computeParticleHeatTransfer(momentsQ);
+    computeParticleSources(momentsQ, momentsD, speciesQ, speciesD);
     dMomentsdtQ = momentsQ + splitConst.segment(kSpecies+nSpec, nMoments);
     dMomentsdtD = momentsD;
     dYdtQ += speciesQ;

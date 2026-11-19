@@ -150,7 +150,7 @@ species), so they are **mass-specific** quantities, not raw densities:
   **kmol-based** Avogadro constant (`Cantera::Avogadro` in C++,
   `cantera.avogadro` in Python, ≈6.022e26/kmol) — the everyday 6.022e23/mol
   value is 1000× off. This conversion is done at the Python interface layer
-  (`FlameSolver.numberDensity` property in `_ember.pyx`), not inside the
+  (`FlameSolver.numberDensity(i)` in `_ember.pyx`), not inside the
   transport equations.
 - `kM`, `kO` = kg of particle-phase metal / O **per kg of gas**. All source
   terms (nucleation, surface reactions) are built from species molecular
@@ -212,6 +212,44 @@ species), so they are **mass-specific** quantities, not raw densities:
   sensitive where `N, mM` are both near zero (e.g. domain edges) — treat
   large diffusivities there with suspicion; likely a mass/`N` noise artifact
   rather than real physics.
+
+### Particle populations (early + late particles)
+
+- Several independent populations = several `Particles(name=...)` objects
+  passed to `Config` (`conf.particleSets`; `conf.particles` is the first).
+  Each owns a consecutive block of moment rows (`ParticleOptions.offset`,
+  `.nMoments` in `readConfig.h`; `ConfigOptions.particles` is the vector,
+  `ConfigOptions.nMoments` the total). The indices `kN..kH` / `kN1..kA2` are
+  relative to the block. Populations share only the gas phase.
+- C++: all per-population options live in `struct ParticleOptions`;
+  `particleUtils` helpers take it. `SourceSystem::computeParticleSources()`
+  loops over the populations, setting `pop`/`pm`/`pn` (options, moments,
+  row count of the current one) for the `compute*Rates` functions.
+  Per-row tolerances: `ConfigOptions.momentAbsTolScale`/`momentEnforceMin`
+  (built in `_ember.pyx`). `particleDiameter`/`particleTemperature` are
+  `nPop × nPoints`, `particleDiffusivity` is `nMoments × nPoints`.
+- Python: `FlameSolver.populationMoments(i)`, `numberDensity(i)`,
+  `particleDiameter(i)`, ... are methods taking the population index.
+  Output keys: unnamed population → plain keys (`moments`, ...), named →
+  suffix `_<name>` (`moments_late`).
+- `NucleationChannel(conversionSpecies=[...], conversionRate=k)`: each
+  molecule becomes a particle at `k·C` ("every monomer a particle");
+  collision and conversion species may contain O (→ mO, nMoments = 3).
+- `Particles(model='bimodal')` (Jeong & Choi 2003, as in Sellmann et al.
+  2019): rows N1 (nuclei, fixed size), N2, M2 [kg/kg], A2 [m²/kg gas] of one
+  material (`phases=[(ratio, density)]`, one entry); nucleus mass from the
+  nucleation channels (all equal), d1 from the density. Fuchs kernel
+  (`fuchsCoagulationKernel`) with the fractal collision diameter d_pp
+  n_p^(1/Df) (`fractalDimension`), `r = max(v2/v1, 2)` split of
+  monomer-monomer collisions, two-sided sintering relaxation of A2
+  (`sintering=(A, Ta)`, no default), condensation onto mode 2. Mode 2 counts
+  as empty below 1 aggregate/m³ and its area is bounded by sphere ≤ a ≤
+  unsintered monomers (`bimodalAggregate`) — without these bounds the
+  integrator's trial states overflowed the kernels / underflowed τ. No
+  energy, surface reactions, evaporation or CNT. Example:
+  `single_Igor_impingingJet_fixedT_particles_late.py`.
+- `Particles(primaryDiameter=d_pp)` (single mode): fractal collision
+  diameter d_pp (d_v/d_pp)^(3/Df) in coagulation and diffusion.
 
 ## Impinging jet (`ImpingingJet` option)
 
