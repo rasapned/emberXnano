@@ -1,0 +1,6 @@
+#Sellmann et al. (2019), flame A, DFF: PMS mass-averaged particle diameter, second (iron oxide) zone,
+#Fig. 7 (circle centres and error bars); measured with the probe at x (perturbed flow)
+#"x [m]","d_av [nm]","low","high"
+0.04902,2.95,2.66,3.25
+0.05412,3.43,3.25,3.62
+0.05921,3.67,3.44,3.87
