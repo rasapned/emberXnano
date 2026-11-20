@@ -5,6 +5,59 @@ One entry per implementation commit, newest first, written by the `physics-chang
 [`PhysicsAndNumerics.md`](PhysicsAndNumerics.md). Commits up to `5837ad2` (2026-10-13) are
 summarised in its §7.
 
+## 2026-11-20 — feat: prescribed radial strain profile for the impinging jet (staged)
+
+**Area:** BC / config: impinging jet, tangential momentum
+
+**What changed (physics):** with `ImpingingJet(strainProfile=(x, U))` the tangential momentum
+equation is not solved. $U(x)$ is imposed, and $V$ follows from continuity. This lets ember reproduce
+an axial mass-flux profile taken from another model, for example the centre line of a 2D
+simulation with buoyancy and free radial spreading. The 1D similarity flow with a single
+pressure curvature $\Lambda$ cannot produce those. It is the momentum counterpart of
+`temperatureProfile` (§5.5).
+
+**Equations:** the momentum equation (§3) is replaced by
+$U(x,t) = U^*(x)$ [1/s] (linear interpolation onto the grid each step) with $\partial U/\partial t \equiv 0$.
+The strain rate $a$ and $\Lambda$ no longer enter. Continuity is unchanged and integrated from the wall:
+
+$$
+(rV)_{j-1} = (rV)_j + h_{j-1}\, r_{j-\frac12}\big(\dot\rho + \beta\rho U^*\big)_{j-1},\qquad (rV)_{J}=0
+$$
+
+To reproduce a target mass flux $m^*(x)=\rho u$ [kg m⁻² s⁻¹] with $m^*(L)=0$, use
+$U^* = -(dm^*/dx)/(\beta\rho)$. Then $V = m^*$ at steady state, provided ember's
+$\rho = pW/(R_uT)$ equals the $\rho$ used to build $U^*$.
+
+**Discretisation / numerics:** $U$ is reset in `setupStep` after the wall/inlet BC, so the
+profile overrides plug flow ($U_0 = 0$) and the wall no-slip condition. It is held in every
+operator:
+- convection (UTW): $\dot U = 0$;
+- momentum diffusion: $B = 0$;
+- production (CVODE and QSS): $\dot U = 0$;
+- `finishStep`: the $\dot U$ rows of `ddtConv/Diff/Prod` are zeroed, so they don't feed the split constants.
+
+**Conservation & units:** mass is conserved as before. The inlet mass flux $V_0$ is an output. Not to be combined
+with `massFlux` (its controller acts on $a$, now unused); `Config.validate` reports it.
+
+**Code:** `flameSolver.cpp::setupStep`, `::prepareIntegrators`, `::finishStep`;
+`ConvectionSystemUTW::f` (`fixedStrain`); `SourceSystemCVODE::f`, `SourceSystemQSS::odefun`.
+Options: `ImpingingJet.strainProfile`; C++ `ConfigOptions.fixedStrain`, `Ufixed_x`, `Ufixed_U`.
+
+**Verification:**
+- *Tests:* `scons test` gives 27/28 C++ tests and 15/15 Python tests. The failing
+  `DiffusionSystemTest.CylindricalCoordinates` doesn't touch the changed code.
+- *Sellmann et al. (2019) flame A, DFF:* `Sellmann2019_DFF_flameA.py`, with T and $U^*$ from the
+  paper's centre line. Ember's $u$ matches the paper's markers within 1 % up to 40 mm, and the
+  residence time within ~3 %. Before, with the strained jet, the peak velocity was 3.5 vs 2.65 m/s.
+- *Run time:* 0.2 s in 475 s.
+
+**Limits / open points:**
+- The match of $V$ relies on ember's $\rho$; composition drift against the source of $U^*$
+  enters directly.
+- Kinks or steps in $U^*$ make the grid refine hard. With raw digitised data, the diffusion step
+  fell ~4× on 0.56 µm cells in hot gas, so smooth $U^*$ first.
+- The option is only wired for `ImpingingJet` (wall continuity).
+
 ## 2026-11-19 — feat: independent particle populations, monomer-conversion nucleation, bimodal model (staged)
 
 **Area:** particles: populations, nucleation, coagulation, sintering, condensation

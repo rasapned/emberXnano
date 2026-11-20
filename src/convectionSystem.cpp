@@ -8,6 +8,7 @@ ConvectionSystemUTW::ConvectionSystemUTW()
     , continuityBC(ContinuityBoundaryCondition::Left)
     , jContBC(0)
     , fixedTemperature(false)
+    , fixedStrain(false)
     , nVars(3)
 {
 }
@@ -168,6 +169,9 @@ int ConvectionSystemUTW::f(const realtype t, const sdVector& y, sdVector& ydot)
 
     if (fixedTemperature) {
         dTdt.setZero();
+    }
+    if (fixedStrain) {
+        dUdt.setZero();
     }
 
     roll_ydot(ydot);

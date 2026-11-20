@@ -91,6 +91,7 @@ $$
 $$
 
 so that the pressure-curvature term is $\Lambda = -\rho_u a^2/\beta^2$ for constant $a$.
+With `ImpingingJet(strainProfile=…)` this equation is replaced by a prescribed $U(x)$ (§5.6).
 
 **Energy**, with $j_k = -\rho D_k\,\partial Y_k/\partial x - (D_k^T/T)\,\partial T/\partial x + Y_k j_{corr}$:
 
@@ -472,6 +473,20 @@ $T(x)$ is reset to the interpolated profile each step, and $\partial T/\partial 
 every operator (convection, diffusion with $B=0$, source, cross terms). This matches Cantera's
 `energy_enabled = False`.
 
+### 5.6 Prescribed radial strain (`ImpingingJet(strainProfile=…)`, 2026-11-20)
+
+$U(x)$ [1/s] is reset to the interpolated profile $U^*$ each step, after the inlet and wall
+BCs, which it overrides. $\partial U/\partial t \equiv 0$ in every operator (convection,
+momentum diffusion with $B=0$, source), so $a$ and $\Lambda$ no longer enter. $V$ still comes
+from continuity integrated from the wall (§3), and the inlet mass flux $V_0$ is an output.
+
+To impose an axial mass flux $m^*(x) = \rho u$, e.g. from a 2D simulation's centre line, use
+$U^* = -(dm^*/dx)/(\beta\rho)$ with $m^*(L) = 0$. Ember then has $V = m^*$ at steady state,
+as long as its $\rho$ matches the one used to build $U^*$.
+
+Smooth $U^*$ first: kinks in it make the grid refine hard. `massFlux` cannot be combined with it.
+Example: `Sellmann2019_DFF_flameA.py`.
+
 ## 6. Numerics
 
 ### 6.1 Spatial discretisation (`diffusionSystem.cpp`, `convectionSystem.cpp`, `grid.cpp`)
@@ -586,6 +601,7 @@ Checks start at `tMin`.
 | 2026-11-17 | numerics | `'moments'` termination: points below `momentsFloor` × peak left out of the RMS rate |
 | 2026-11-17 | particles | optional cap of the surface rate coefficient at the hard-sphere gas–particle collision rate (`surfaceCollisionLimit`) |
 | 2026-11-19 | particles | independent populations (one moment block each, gas-coupled only); oxide collision nuclei and monomer-conversion nucleation $J = k_cc_k$; bimodal model (Fuchs kernel, fractal aggregates, two-sided sintering, condensation onto mode 2); single-mode `primaryDiameter` fractal collision diameter |
+| 2026-11-20 | BC/config | `ImpingingJet(strainProfile)`: prescribed $U(x)$, momentum equation not solved, $V$ from continuity; with $U^* = -(dm^*/dx)/(\beta\rho)$ it imposes an axial mass-flux profile $m^*$ |
 
 ## 8. Known limitations / open points
 
@@ -620,6 +636,8 @@ Checks start at `tMin`.
 - CNT branch unit issues (§4.4b).
 - Convection is first-order upwind, so grid adaptation carries the accuracy; refinement closed
   the remaining 1 % gap to Cantera in the impinging-jet validation.
+- `strainProfile` (§5.6): $V$ follows ember's own $\rho$, so composition differences to the
+  source of $U^*$ enter directly; only wired for `ImpingingJet` (wall continuity).
 - `ControlVolume` left BC still lacks the first-face cross-flux credit given to `InletFlux`.
 - `conductivityModel='sutherland'` reproduces OpenFOAM, not better physics: mass-fraction
   mixing under-weights H$_2$ ($\lambda$ 13–42 % below Wilke/Mathur in H$_2$-rich preheat zones).

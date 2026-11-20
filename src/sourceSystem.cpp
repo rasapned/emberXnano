@@ -799,6 +799,9 @@ int SourceSystemCVODE::f(const realtype t, const sdVector& y, sdVector& ydot)
     if (options->fixedTemperature) {
         dTdt = 0;
     }
+    if (options->fixedStrain) {
+        dUdt = 0;
+    }
     dYdt = scale * wDot * W / rho + splitConst.segment(kSpecies, nSpec);
 
     // Particle nucleation source terms (two-way coupled with the gas phase)
@@ -1149,6 +1152,10 @@ void SourceSystemQSS::odefun(double t, const dvec& y, dvec& q, dvec& d,
     if (options->fixedTemperature) {
         dTdtQ = 0;
         dTdtD = 0;
+    }
+    if (options->fixedStrain) {
+        dUdtQ = 0;
+        dUdtD = 0;
     }
 
     dYdtQ = scale * wDotQ * W / rho + splitConst.segment(kSpecies, nSpec);

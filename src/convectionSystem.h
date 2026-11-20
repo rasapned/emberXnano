@@ -95,6 +95,9 @@ public:
     //! True if T is prescribed (energy equation not solved): dT/dt = 0
     bool fixedTemperature;
 
+    //! True if U is prescribed (momentum equation not solved): dU/dt = 0
+    bool fixedStrain;
+
 private:
     void V2rV(); //!< compute #rV from #V
     void rV2V(); //!< compute #V from #rV

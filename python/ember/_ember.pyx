@@ -687,10 +687,17 @@ cdef class ConfigOptions:
                 opts.Tfixed_x = map_vector(&data[0], len(data), 1)
                 data = np.ascontiguousarray(IJ.temperatureProfile[1], dtype=float)
                 opts.Tfixed_T = map_vector(&data[0], len(data), 1)
+            opts.fixedStrain = IJ.strainProfile is not None
+            if opts.fixedStrain:
+                data = np.ascontiguousarray(IJ.strainProfile[0], dtype=float)
+                opts.Ufixed_x = map_vector(&data[0], len(data), 1)
+                data = np.ascontiguousarray(IJ.strainProfile[1], dtype=float)
+                opts.Ufixed_U = map_vector(&data[0], len(data), 1)
         else:
             opts.impingingJet = False
             opts.massFluxControl = False
             opts.fixedTemperature = False
+            opts.fixedStrain = False
 
         # Grid
         opts.centerGridMin = self.grid.centerGridMin

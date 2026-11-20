@@ -193,6 +193,8 @@ cdef extern from "readConfig.h":
         double wallTemperature
         cbool fixedTemperature
         CxxEigenVec Tfixed_x, Tfixed_T
+        cbool fixedStrain
+        CxxEigenVec Ufixed_x, Ufixed_U
         cbool massFluxControl
         double massFluxTarget, massFluxProportionalGain, massFluxIntegralGain
 

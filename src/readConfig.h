@@ -439,6 +439,12 @@ public:
     dvec Tfixed_x; //!< positions of the prescribed temperature profile [m]
     dvec Tfixed_T; //!< prescribed temperature profile [K]
 
+    //! True if the radial strain U(x) is prescribed (Ufixed_U at positions
+    //! Ufixed_x) instead of being solved for [impingingJet.strainProfile]
+    bool fixedStrain;
+    dvec Ufixed_x; //!< positions of the prescribed strain profile [m]
+    dvec Ufixed_U; //!< prescribed radial strain profile U = v_r/r [1/s]
+
     //! True if the strain rate a(t) (i.e. the pressure curvature term) is set
     //! by a feedback controller to reach #massFluxTarget at the inlet
     bool massFluxControl;

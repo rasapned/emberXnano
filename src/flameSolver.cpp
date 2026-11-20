@@ -183,6 +183,12 @@ void FlameSolver::setupStep()
         T = mathUtils::interp1(options.Tfixed_x, options.Tfixed_T, x, false);
     }
 
+    if (options.fixedStrain) {
+        // Prescribed radial strain profile (momentum equation not solved);
+        // V follows from continuity
+        U = mathUtils::interp1(options.Ufixed_x, options.Ufixed_U, x, false);
+    }
+
     updateChemicalProperties();
 
     updateBC();
@@ -265,6 +271,11 @@ void FlameSolver::prepareIntegrators()
         diffusionTerms[kEnergy].B.setZero(nPoints);
     }
 
+    // Prescribed strain profile: no momentum diffusion
+    if (options.fixedStrain) {
+        diffusionTerms[kMomentum].B.setZero(nPoints);
+    }
+
     // Impinging jet: T and U are prescribed at the wall and U at the inlet;
     // species and moments keep the zero-flux Wall stencil.
     if (grid.rightBC == BoundaryCondition::Wall) {
@@ -339,6 +350,13 @@ int FlameSolver::finishStep()
         ddtDiff.row(kEnergy).setZero();
         ddtProd.row(kEnergy).setZero();
         ddtCross.row(kEnergy).setZero();
+    }
+
+    // Prescribed strain profile: U has no rate of change anywhere
+    if (options.fixedStrain) {
+        ddtConv.row(kMomentum).setZero();
+        ddtDiff.row(kMomentum).setZero();
+        ddtProd.row(kMomentum).setZero();
     }
 
     // *** End of Strang-split integration step ***
@@ -680,6 +698,7 @@ void FlameSolver::resizeAuxiliary()
 
     convectionSystem.utwSystem.setStrainFunction(strainfunc);
     convectionSystem.utwSystem.fixedTemperature = options.fixedTemperature;
+    convectionSystem.utwSystem.fixedStrain = options.fixedStrain;
     convectionSystem.utwSystem.setRhou(rhou);
 
     if (options.quasi2d) {

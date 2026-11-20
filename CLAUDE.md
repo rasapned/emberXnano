@@ -290,6 +290,13 @@ only. Example/validation: `python/ember/examples/example_impingingJet.py`.
   (stops at tMin); use `measurement='moments'` (`momentsTol` [1/s]: RMS rate
   of every particle moment relative to its peak, `checkTerminationCondition`)
   for particle cases, e.g. `single_Igor_impingingJet_fixedT_particles.py`.
+- Prescribed flow (`ImpingingJet(strainProfile=(x, U))`): `options.fixedStrain`
+  resets U to the profile in `setupStep` (overriding the U(0) = U(L) = 0 BC) and
+  zeroes dU/dt in all operators; V follows from continuity from the wall, so
+  the inlet flux is an output and `massFlux`/`a` are unused. To impose a mass
+  flux m(x) = ρu (e.g. a 2D centre line): U = −(dm/dx)/(βρ); smooth U first
+  (kinks make the grid refine to the minimum spacing). Example:
+  `Sellmann2019_DFF_flameA.py`.
 - Starting from given profiles (`haveProfiles=True`) the inlet stream
   composition `Yleft` is taken from `Y[:, 0]`; overwrite that point with the
   supplied mixture, since a converged burner/jet inlet node is depleted in

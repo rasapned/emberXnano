@@ -1133,6 +1133,16 @@ class ImpingingJet(Options):
     #: *wallTemperature*.
     temperatureProfile = Option(None)
 
+    #: Prescribed radial strain profile ``(x [m], U [1/s])`` (two arrays),
+    #: U = v_r/r. If given, the momentum equation is not solved: U is
+    #: interpolated from this profile onto the grid and V follows from
+    #: continuity, integrated from the wall, so the inlet mass flux is an
+    #: output. To reproduce an axial mass flux profile m(x) = rho*u (e.g. the
+    #: centre line of a 2D simulation), use ``U = -(dm/dx) / (beta*rho)``
+    #: (beta = 2 for 'disc'), with m = 0 at the wall. Not combined with
+    #: *massFlux*; the strain rate (*StrainParameters*) is then not used.
+    strainProfile = Option(None)
+
 
 class Times(Options):
     """
@@ -1444,6 +1454,11 @@ class Config(object):
                 error = True
                 print("Error: ImpingingJet.massFlux cannot be combined with"
                       " StrainParameters.function.")
+            if (self.impingingJet.massFlux.value is not None and
+                self.impingingJet.strainProfile.value is not None):
+                error = True
+                print("Error: ImpingingJet.massFlux cannot be combined with"
+                      " ImpingingJet.strainProfile.")
 
         if (self.terminationCondition.measurement == 'moments' and
             all(p.nMoments.value == 0 for p in self.particleSets)):
